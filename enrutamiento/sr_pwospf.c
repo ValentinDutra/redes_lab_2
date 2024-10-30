@@ -36,6 +36,8 @@ pthread_t g_topology_entries_thread;
 pthread_t g_rx_lsu_thread;
 pthread_t g_dijkstra_thread;
 
+pthread_mutex_t g_dijkstra_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 struct in_addr g_router_id;
 uint8_t g_ospf_multicast_mac[ETHER_ADDR_LEN];
 struct ospfv2_neighbor* g_neighbors;
