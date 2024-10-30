@@ -257,7 +257,6 @@ void* send_hellos(void* arg)
 
         /* Chequeo todas las interfaces para enviar el paquete HELLO */
             /* Cada interfaz matiene un contador en segundos para los HELLO*/
-            /* Crear un hilo para enviar el paquete HELLO */
             /* Reiniciar el contador de segundos para HELLO */
 
         /* Desbloqueo */
@@ -421,8 +420,9 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
 
     /* Seteo el vecino en la interfaz por donde llegó y actualizo la lista de vecinos */
 
-    /* Si es un nuevo vecino, debo enviar un LSU*/
-        /* Creo el hilo para enviar el LSU */
+    /* Si es un nuevo vecino, debo enviar LSUs por todas mis interfaces*/
+        /* Recorro todas las interfaces para enviar el paquete LSU */
+        /* Si la interfaz tiene un vecino, envío un LSU */
 
 } /* -- sr_handle_pwospf_hello_packet -- */
 
