@@ -183,7 +183,7 @@ void* pwospf_run_thread(void* arg)
 
     pthread_create(&g_hello_packet_thread, NULL, send_hellos, sr);
     pthread_create(&g_all_lsu_thread, NULL, send_all_lsu, sr);
-    pthread_create(&g_neighbors_thread, NULL, check_neighbors_life, NULL);
+    pthread_create(&g_neighbors_thread, NULL, check_neighbors_life, sr);
     pthread_create(&g_topology_entries_thread, NULL, check_topology_entries_age, sr);
 
     return NULL;
@@ -203,8 +203,10 @@ void* pwospf_run_thread(void* arg)
 
 void* check_neighbors_life(void* arg)
 {
+    struct sr_instance* sr = (struct sr_instance*)arg;
     /* 
     Cada 1 segundo, chequea la lista de vecinos.
+    Si hay un cambio, se debe ajustar el neighbor id en la interfaz.
     */
     return NULL;
 } /* -- check_neighbors_life -- */
@@ -497,6 +499,11 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
 
 void sr_handle_pwospf_packet(struct sr_instance* sr, uint8_t* packet, unsigned int length, struct sr_if* rx_if)
 {
+    /*Si aún no terminó la inicialización, se descarta el paquete recibido*/
+    if (g_router_id.s_addr == 0) {
+       return;
+    }
+
     ospfv2_hdr_t* rx_ospfv2_hdr = ((ospfv2_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)));
     powspf_rx_lsu_param_t* rx_lsu_param = ((powspf_rx_lsu_param_t*)(malloc(sizeof(powspf_rx_lsu_param_t))));
 
@@ -517,7 +524,11 @@ void sr_handle_pwospf_packet(struct sr_instance* sr, uint8_t* packet, unsigned i
             }
             rx_lsu_param->length = length;
             rx_lsu_param->rx_if = rx_if;
-            pthread_create(&g_rx_lsu_thread, NULL, sr_handle_pwospf_lsu_packet, rx_lsu_param);
+            pthread_attr_t attr;
+            pthread_attr_init(&attr);
+            pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+            pthread_t pid;
+            pthread_create(&pid, &attr, sr_handle_pwospf_lsu_packet, rx_lsu_param);
             break;
     }
 } /* -- sr_handle_pwospf_packet -- */
