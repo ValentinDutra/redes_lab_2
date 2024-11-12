@@ -55,22 +55,28 @@ void sr_send_icmp_error_packet(uint8_t type,
                                uint32_t ipDst,
                                uint8_t *ipPacket)
 {
-  /* Obtener el encabezado IP del paquete original*/
-  sr_ip_hdr_t *orig_ip_hdr = (sr_ip_hdr_t *)ipPacket;
+  printf("Enviando paquete ICMP de error...\n");
 
-  /*Encontrar la interfaz de salida basada en la dirección IP de destino*/
+  /* Obtener el encabezado IP del paquete original */
+  sr_ip_hdr_t *orig_ip_hdr = (sr_ip_hdr_t *)(ipPacket + sizeof(sr_ethernet_hdr_t));
 
+  printf("IP destino del paquete ICMP de error: %s\n", inet_ntoa(*(struct in_addr *)&ipDst));
+  /* Encontrar la interfaz de salida basada en la dirección IP de destino */
   uint32_t destIP = ipDst;
-
   struct sr_rt *best_route = NULL;
   struct sr_rt *routing_entry = sr->routing_table;
   int longest_prefix = -1;
 
+  printf("Buscando la mejor ruta para el paquete ICMP de error...\n");
   while (routing_entry)
   {
     uint32_t entry_dest = routing_entry->dest.s_addr;
     uint32_t entry_mask = routing_entry->mask.s_addr;
     uint32_t masked_destIP = destIP & entry_mask;
+
+    printf("Verificando entrada de la tabla de enrutamiento: destino %s, máscara %s\n",
+           inet_ntoa(*(struct in_addr *)&entry_dest),
+           inet_ntoa(*(struct in_addr *)&entry_mask));
 
     uint32_t xor_result = ~(entry_dest ^ masked_destIP);
 
@@ -84,7 +90,7 @@ void sr_send_icmp_error_packet(uint8_t type,
         break;
     }
 
-    /* Si la coincidencia es más específica, actualiza la mejor ruta*/
+    /* Si la coincidencia es más específica, actualiza la mejor ruta */
     if (prefix_length > longest_prefix)
     {
       best_route = routing_entry;
@@ -96,31 +102,45 @@ void sr_send_icmp_error_packet(uint8_t type,
 
   if (!best_route)
   {
+    printf("No se encontró una ruta válida para la dirección IP de destino: %s\n",
+           inet_ntoa(*(struct in_addr *)&destIP));
     return;
   }
 
-  /* Obtener la interfaz de salida*/
+  printf("Ruta encontrada: destino %s, gateway %s, interfaz %s\n",
+         inet_ntoa(*(struct in_addr *)&best_route->dest.s_addr),
+         inet_ntoa(*(struct in_addr *)&best_route->gw.s_addr),
+         best_route->interface);
+
+  /* Obtener la interfaz de salida */
   struct sr_if *iface = sr_get_interface(sr, best_route->interface);
-  if (!iface)
+  if (!iface || !iface->addr)
   {
+    printf("Error: No se encontró la interfaz de salida o la dirección MAC es nula.\n");
     return;
   }
 
-  /* Crear el nuevo paquete ICMP de error*/
+  printf("Interfaz de salida encontrada: %s, dirección IP: %s\n", iface->name, inet_ntoa(*(struct in_addr *)&iface->ip));
+
+  /* Crear el nuevo paquete ICMP de error */
   unsigned int len = sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t) + sizeof(sr_icmp_t3_hdr_t);
   uint8_t *icmpPacket = (uint8_t *)malloc(len);
   if (!icmpPacket)
   {
-    fprintf(stderr, "Error al asignar memoria para el paquete ICMP.\n");
+    printf("Error al asignar memoria para el paquete ICMP.\n");
     return;
   }
 
-  /* Configurar el encabezado Ethernet*/
+  printf("Creando el paquete ICMP de error...\n");
+
+  /* Configurar el encabezado Ethernet */
   sr_ethernet_hdr_t *eth_hdr = (sr_ethernet_hdr_t *)icmpPacket;
   memcpy(eth_hdr->ether_shost, iface->addr, ETHER_ADDR_LEN);
   eth_hdr->ether_type = htons(ethertype_ip);
+  printf("Encabezado Ethernet configurado: ether_shost: %s, tipo: %x\n",
+         ether_ntoa((struct ether_addr *)eth_hdr->ether_shost), eth_hdr->ether_type);
 
-  /* Configurar el encabezado IP*/
+  /* Configurar el encabezado IP */
   sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(icmpPacket + sizeof(sr_ethernet_hdr_t));
   ip_hdr->ip_v = 4;
   ip_hdr->ip_hl = sizeof(sr_ip_hdr_t) / 4;
@@ -130,12 +150,16 @@ void sr_send_icmp_error_packet(uint8_t type,
   ip_hdr->ip_off = htons(IP_DF);
   ip_hdr->ip_ttl = 64;
   ip_hdr->ip_p = ip_protocol_icmp;
-  ip_hdr->ip_src = orig_ip_hdr->ip_dst;
-  ip_hdr->ip_dst = iface->ip;
+  ip_hdr->ip_src = iface->ip;
+  ip_hdr->ip_dst = ipDst;
   ip_hdr->ip_sum = 0;
   ip_hdr->ip_sum = cksum(ip_hdr, sizeof(sr_ip_hdr_t));
 
-  /* Configurar el encabezado ICMP de error*/
+  printf("Encabezado IP configurado: IP origen %s, IP destino %s\n",
+         inet_ntoa(*(struct in_addr *)&ip_hdr->ip_src),
+         inet_ntoa(*(struct in_addr *)&ip_hdr->ip_dst));
+
+  /* Configurar el encabezado ICMP de error */
   sr_icmp_t3_hdr_t *icmp_hdr = (sr_icmp_t3_hdr_t *)(icmpPacket + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t));
   icmp_hdr->icmp_type = type;
   icmp_hdr->icmp_code = code;
@@ -145,22 +169,28 @@ void sr_send_icmp_error_packet(uint8_t type,
   icmp_hdr->icmp_sum = 0;
   icmp_hdr->icmp_sum = cksum(icmp_hdr, sizeof(sr_icmp_t3_hdr_t));
 
-  /* Buscar la dirección MAC del siguiente salto en la caché ARP*/
+  printf("Encabezado ICMP configurado: tipo %d, código %d\n", icmp_hdr->icmp_type, icmp_hdr->icmp_code);
+
+  /* Buscar la dirección MAC del siguiente salto en la caché ARP */
   uint32_t next_hop_ip = (best_route->gw.s_addr != 0) ? best_route->gw.s_addr : ipDst;
   struct sr_arpentry *arp_entry = sr_arpcache_lookup(&(sr->cache), next_hop_ip);
 
+  printf("Buscando la entrada ARP en la caché...\n");
   if (arp_entry)
   {
-    /* Entrada ARP encontrada, enviar el paquete*/
+    printf("Entrada ARP encontrada: dirección MAC de destino: %s\n", ether_ntoa((struct ether_addr *)arp_entry->mac));
     memcpy(eth_hdr->ether_dhost, arp_entry->mac, ETHER_ADDR_LEN);
-    sr_send_packet(sr, icmpPacket, len, iface->name);
+    sr_send_packet(sr, icmpPacket, len, best_route->interface);
     free(icmpPacket);
+    printf("Paquete ICMP de error enviado correctamente.\n");
+    free(arp_entry);
   }
   else
   {
-    /* No se encontró entrada ARP, encolar solicitud ARP*/
+    printf("No se encontró entrada ARP, encolando solicitud ARP para IP %s...\n", inet_ntoa(*(struct in_addr *)&next_hop_ip));
     struct sr_arpreq *req = sr_arpcache_queuereq(&(sr->cache), next_hop_ip, icmpPacket, len, best_route->interface);
     handle_arpreq(sr, req);
+    printf("Solicitud ARP encolada.\n");
   }
 }
 
@@ -260,7 +290,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
 
         if (arp_entry)
         {
-          /* Crear un nuevo encabezado Ethernet para reenviar el paquete */
+          /* Crear un nuevo encabezado Ethernet para enviar el paquete */
           memcpy(eHdr->ether_shost, sr_get_interface(sr, best_route->interface)->addr, ETHER_ADDR_LEN);
           memcpy(eHdr->ether_dhost, arp_entry->mac, ETHER_ADDR_LEN);
 
@@ -277,11 +307,15 @@ void sr_handle_ip_packet(struct sr_instance *sr,
         return;
       }
     }
-    else
+    else if (ipHdr->ip_p == 17 || ipHdr->ip_p == 6)
     {
       /*Falta chequear la carga util UDP o TCP*/
       sr_send_icmp_error_packet(3, 3, sr, ipHdr->ip_src, packet);
       printf("Paquete IP no es ICMP. Enviando ICMP Port Unreachable.\n");
+    }
+    else
+    {
+      printf("Paquete IP no es ICMP. IGNORADO\n");
     }
     return;
   }
