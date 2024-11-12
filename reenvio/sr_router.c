@@ -319,6 +319,96 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     }
     return;
   }
+  else
+  {
+    printf("El paquete no está destinado a una de las interfaces locales.\n");
+
+    /* Verificamos el TTL y el tamano del paquete*/
+    if (ipHdr->ip_ttl <= 1)
+    {
+      printf("TTL <= 1. Enviando ICMP Time Exceeded.\n");
+      sr_send_icmp_error_packet(11, 0, sr, ipHdr->ip_src, packet);
+      return;
+    }
+
+    /* Decrementar TTL */
+    ipHdr->ip_ttl--;
+
+    /* Recalcular checksum IP */
+    ipHdr->ip_sum = 0;
+    ipHdr->ip_sum = cksum(ipHdr, sizeof(sr_ip_hdr_t));
+
+    uint32_t destIP = ipHdr->ip_dst;
+
+    struct sr_rt *best_route = NULL;
+    struct sr_rt *routing_entry = sr->routing_table;
+    int longest_prefix = -1;
+
+    while (routing_entry)
+    {
+      uint32_t entry_dest = routing_entry->dest.s_addr;
+      uint32_t entry_mask = routing_entry->mask.s_addr;
+      uint32_t masked_destIP = destIP & entry_mask;
+
+      uint32_t xor_result = ~(entry_dest ^ masked_destIP);
+
+      int prefix_length = 0;
+      int i;
+      for (i = 31; i >= 0; i--)
+      {
+        if ((xor_result >> i) & 1)
+          prefix_length++;
+        else
+          break;
+      }
+
+      /* Si la coincidencia es más específica, actualiza la mejor ruta*/
+      if (prefix_length > longest_prefix)
+      {
+        best_route = routing_entry;
+        longest_prefix = prefix_length;
+      }
+
+      routing_entry = routing_entry->next;
+    }
+
+    if (best_route)
+    {
+      sr_print_routing_entry(best_route);
+      printf("Ruta encontrada: Destino , Gateway , Interfaz .\n");
+      fflush(stdout);
+    }
+
+    if (!best_route)
+    {
+      printf("No se encontró una ruta válida. Enviando ICMP Network Unreachable.\n");
+      sr_send_icmp_error_packet(3, 0, sr, destIP, packet);
+      return;
+    }
+
+    struct sr_arpentry *arp_entry = NULL;
+    uint32_t next_hop_ip = (best_route->gw.s_addr != 0) ? best_route->gw.s_addr : destIP;
+    arp_entry = sr_arpcache_lookup(&(sr->cache), next_hop_ip);
+
+    if (arp_entry)
+    {
+      /* Crear un nuevo encabezado Ethernet para enviar el paquete */
+      memcpy(eHdr->ether_shost, sr_get_interface(sr, best_route->interface)->addr, ETHER_ADDR_LEN);
+      memcpy(eHdr->ether_dhost, arp_entry->mac, ETHER_ADDR_LEN);
+
+      /* Enviar el paquete */
+      sr_send_packet(sr, packet, len, best_route->interface);
+      free(arp_entry);
+    }
+    else
+    {
+      /* Encolar la solicitud ARP */
+      struct sr_arpreq *req = sr_arpcache_queuereq(&(sr->cache), next_hop_ip, packet, len, best_route->interface);
+      handle_arpreq(sr, req);
+    }
+    return;
+  }
+  printf("Paquete IP manejado correctamente.\n");
 }
 
 /*
