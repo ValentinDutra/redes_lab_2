@@ -30,6 +30,13 @@
 #define OSPF_PROTOCOL_TYPE 89
 #define OSPF_LSU_TIMEOUT 30
 
+#define OSPF_HDR_LEN sizeof(ospfv2_hdr_t)
+#define OSPF_HELLO_HDR_LEN sizeof(ospfv2_hello_hdr_t)
+#define IP_HDR_LEN sizeof(sr_ip_hdr_t)
+#define ETHER_HDR_LENN sizeof(sr_ethernet_hdr_t)
+#define OSPF_LSU_HDR_LEN sizeof(ospfv2_lsu_hdr_t)
+#define LSA_LEN sizeof(ospfv2_lsa_t)
+
 /*pthread_t hello_thread;*/
 pthread_t g_hello_packet_thread;
 pthread_t g_all_lsu_thread;
@@ -295,10 +302,10 @@ void *check_neighbors_life(void *arg)
  *
  *---------------------------------------------------------------------*/
 
-void* check_topology_entries_age(void* arg)
+void *check_topology_entries_age(void *arg)
 {
-     Debug("\n-> PWOSPF: Check topology entries age\n");
-    struct sr_instance* sr = (struct sr_instance*)arg;
+    Debug("\n-> PWOSPF: Check topology entries age\n");
+    struct sr_instance *sr = (struct sr_instance *)arg;
 
     while (1)
     {
@@ -311,8 +318,8 @@ void* check_topology_entries_age(void* arg)
         int topology_changed = 0;
 
         /* Recorrer la lista de entradas de topología */
-        struct pwospf_topology_entry* prev_entry = g_topology;
-        struct pwospf_topology_entry* entry = g_topology->next;
+        struct pwospf_topology_entry *prev_entry = g_topology;
+        struct pwospf_topology_entry *entry = g_topology->next;
 
         while (entry != NULL)
         {
@@ -347,7 +354,7 @@ void* check_topology_entries_age(void* arg)
 
             /* Ejecutar Dijkstra en un nuevo hilo */
             pthread_t dijkstra_thread;
-            dijkstra_param_t* dijkstra_param = malloc(sizeof(dijkstra_param_t));
+            dijkstra_param_t *dijkstra_param = malloc(sizeof(dijkstra_param_t));
             dijkstra_param->sr = sr;
             dijkstra_param->topology = g_topology;
             dijkstra_param->rid = g_router_id;
@@ -372,7 +379,7 @@ void* check_topology_entries_age(void* arg)
 
 void *send_hellos(void *arg)
 {
-     Debug("\n-> PWOSPF: Send hellos\n");
+    Debug("\n-> PWOSPF: Send hellos\n");
     struct sr_instance *sr = (struct sr_instance *)arg;
 
     /* Mapa para almacenar el contador de HELLO por interfaz */
@@ -440,7 +447,7 @@ void *send_hellos(void *arg)
 
 void *send_hello_packet(void *arg)
 {
-     Debug("\n-> PWOSPF: Send hello packet\n");
+    Debug("\n-> PWOSPF: Send hello packet\n");
     powspf_hello_lsu_param_t *hello_param = (powspf_hello_lsu_param_t *)(arg);
 
     Debug("\n\nPWOSPF: Constructing HELLO packet for interface %s: \n", hello_param->interface->name);
@@ -452,14 +459,8 @@ void *send_hello_packet(void *arg)
     uint8_t *packet;
     unsigned int packet_len;
 
-    /* Variables para las longitudes de los encabezados */
-    unsigned int eth_hdr_len = sizeof(sr_ethernet_hdr_t);
-    unsigned int ip_hdr_len = sizeof(sr_ip_hdr_t);
-    unsigned int ospf_hdr_len = sizeof(ospfv2_hdr_t);
-    unsigned int ospf_hello_hdr_len = sizeof(ospfv2_hello_hdr_t);
-
     /* Calcular la longitud total del paquete */
-    packet_len = eth_hdr_len + ip_hdr_len + ospf_hdr_len + ospf_hello_hdr_len;
+    packet_len = ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN + OSPF_HELLO_HDR_LEN;
 
     /* Alocar memoria para el paquete */
     packet = (uint8_t *)malloc(packet_len);
@@ -480,11 +481,11 @@ void *send_hello_packet(void *arg)
     eth_hdr->ether_type = htons(ethertype_ip);
 
     /* Paso 4: Inicializo cabezal IP */
-    sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + eth_hdr_len);
+    sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + ETHER_HDR_LENN);
     ip_hdr->ip_v = 4;
-    ip_hdr->ip_hl = ip_hdr_len / 4;
+    ip_hdr->ip_hl = IP_HDR_LEN / 4;
     ip_hdr->ip_tos = 0;
-    ip_hdr->ip_len = htons(ip_hdr_len + ospf_hdr_len + ospf_hello_hdr_len);
+    ip_hdr->ip_len = htons(IP_HDR_LEN + OSPF_HDR_LEN + OSPF_HELLO_HDR_LEN);
     ip_hdr->ip_id = htons(0);
     ip_hdr->ip_off = htons(IP_DF);
     ip_hdr->ip_ttl = 64;
@@ -494,13 +495,13 @@ void *send_hello_packet(void *arg)
 
     /* Paso 5: Calculo y seteo el checksum IP */
     ip_hdr->ip_sum = 0;
-    ip_hdr->ip_sum = cksum(ip_hdr, ip_hdr_len);
+    ip_hdr->ip_sum = ip_cksum(ip_hdr, IP_HDR_LEN);
 
     /* Paso 6: Inicializo cabezal de PWOSPF con versión 2 y tipo HELLO */
-    ospfv2_hdr_t *ospf_hdr = (ospfv2_hdr_t *)(packet + eth_hdr_len + ip_hdr_len);
+    ospfv2_hdr_t *ospf_hdr = (ospfv2_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN);
     ospf_hdr->version = OSPF_V2;
     ospf_hdr->type = OSPF_TYPE_HELLO;
-    ospf_hdr->len = htons(ospf_hdr_len + ospf_hello_hdr_len);
+    ospf_hdr->len = htons(OSPF_HDR_LEN + OSPF_HELLO_HDR_LEN);
     ospf_hdr->rid = g_router_id.s_addr;
     ospf_hdr->aid = htonl(0);
     ospf_hdr->csum = 0;
@@ -510,7 +511,7 @@ void *send_hello_packet(void *arg)
     /* Paso 7: Seteo máscara con la máscara de mi interfaz de salida */
     /* Paso 8: Seteo Hello Interval con OSPF_DEFAULT_HELLOINT */
     /* Paso 9: Seteo Padding en 0 */
-    ospfv2_hello_hdr_t *ospf_hello_hdr = (ospfv2_hello_hdr_t *)(packet + eth_hdr_len + ip_hdr_len + ospf_hdr_len);
+    ospfv2_hello_hdr_t *ospf_hello_hdr = (ospfv2_hello_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN);
     ospf_hello_hdr->nmask = interface->mask;
     ospf_hello_hdr->helloint = htons(OSPF_DEFAULT_HELLOINT);
     ospf_hello_hdr->padding = 0;
@@ -518,7 +519,7 @@ void *send_hello_packet(void *arg)
     /* Paso 10: Calculo y actualizo el checksum del cabezal OSPF */
     ospf_hdr->csum = 0;
     uint16_t ospf_packet_len = ntohs(ospf_hdr->len);
-    ospf_hdr->csum = cksum(ospf_hdr, ospf_packet_len);
+    ospf_hdr->csum = ospfv2_cksum(ospf_hdr, ospf_packet_len);
 
     /* Paso 11: Envío el paquete HELLO */
     if (sr_send_packet(sr, packet, packet_len, interface->name) != 0)
@@ -553,7 +554,7 @@ void *send_hello_packet(void *arg)
 
 void *send_all_lsu(void *arg)
 {
-     Debug("\n-> PWOSPF: send all lsu\n");
+    Debug("\n-> PWOSPF: send all lsu\n");
     struct sr_instance *sr = (struct sr_instance *)arg;
 
     while (1)
@@ -595,7 +596,7 @@ void *send_all_lsu(void *arg)
 
 void *send_lsu(void *arg)
 {
-     Debug("\n-> PWOSPF: Send lsu\n");
+    Debug("\n-> PWOSPF: Send lsu\n");
     powspf_hello_lsu_param_t *lsu_param = (powspf_hello_lsu_param_t *)(arg);
     struct sr_instance *sr = lsu_param->sr;
     struct sr_if *interface = lsu_param->interface;
@@ -613,13 +614,6 @@ void *send_lsu(void *arg)
     /* Variables para almacenar el paquete y su longitud */
     uint8_t *packet;
     unsigned int packet_len;
-
-    /* Variables para las longitudes de los encabezados */
-    unsigned int eth_hdr_len = sizeof(sr_ethernet_hdr_t);
-    unsigned int ip_hdr_len = sizeof(sr_ip_hdr_t);
-    unsigned int ospf_hdr_len = sizeof(ospfv2_hdr_t);
-    unsigned int ospf_lsu_hdr_len = sizeof(ospfv2_lsu_hdr_t);
-    unsigned int lsa_len = sizeof(ospfv2_lsa_t);
 
     /* Paso 2: Contar el número de LSAs (rutas a enviar) */
     int num_lsas = 0;
@@ -642,7 +636,7 @@ void *send_lsu(void *arg)
     }
 
     /* Paso 3: Calcular la longitud total del paquete */
-    packet_len = eth_hdr_len + ip_hdr_len + ospf_hdr_len + ospf_lsu_hdr_len + (num_lsas * lsa_len);
+    packet_len = ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN + OSPF_LSU_HDR_LEN + (num_lsas * LSA_LEN);
 
     /* Alocar memoria para el paquete */
     packet = (uint8_t *)malloc(packet_len);
@@ -661,11 +655,11 @@ void *send_lsu(void *arg)
     eth_hdr->ether_type = htons(ethertype_ip);
 
     /* Paso 5: Inicializar el encabezado IP */
-    sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + eth_hdr_len);
+    sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + ETHER_HDR_LENN);
     ip_hdr->ip_v = 4;
-    ip_hdr->ip_hl = ip_hdr_len / 4;
+    ip_hdr->ip_hl = IP_HDR_LEN / 4;
     ip_hdr->ip_tos = 0;
-    ip_hdr->ip_len = htons(ip_hdr_len + ospf_hdr_len + ospf_lsu_hdr_len + (num_lsas * lsa_len));
+    ip_hdr->ip_len = htons(IP_HDR_LEN + OSPF_HDR_LEN + OSPF_LSU_HDR_LEN + (num_lsas * LSA_LEN));
     ip_hdr->ip_id = htons(0);
     ip_hdr->ip_off = htons(IP_DF);
     ip_hdr->ip_ttl = 64;
@@ -695,10 +689,10 @@ void *send_lsu(void *arg)
     ip_hdr->ip_dst = neighbor_ip.s_addr;
 
     /* Paso 6: Inicializar el encabezado OSPF */
-    ospfv2_hdr_t *ospf_hdr = (ospfv2_hdr_t *)(packet + eth_hdr_len + ip_hdr_len);
+    ospfv2_hdr_t *ospf_hdr = (ospfv2_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN);
     ospf_hdr->version = OSPF_V2;
     ospf_hdr->type = OSPF_TYPE_LSU;
-    ospf_hdr->len = htons(ospf_hdr_len + ospf_lsu_hdr_len + (num_lsas * lsa_len));
+    ospf_hdr->len = htons(OSPF_HDR_LEN + OSPF_LSU_HDR_LEN + (num_lsas * LSA_LEN));
     ospf_hdr->rid = g_router_id.s_addr;
     ospf_hdr->aid = htonl(0);
     ospf_hdr->csum = 0;
@@ -706,14 +700,14 @@ void *send_lsu(void *arg)
     ospf_hdr->audata = 0;
 
     /* Paso 7: Inicializar el encabezado LSU específico */
-    ospfv2_lsu_hdr_t *lsu_hdr = (ospfv2_lsu_hdr_t *)(packet + eth_hdr_len + ip_hdr_len + ospf_hdr_len);
+    ospfv2_lsu_hdr_t *lsu_hdr = (ospfv2_lsu_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN);
     lsu_hdr->seq = htons(++g_sequence_num);
     lsu_hdr->ttl = OSPF_MAX_LSU_TTL;
     lsu_hdr->unused = 0;
     lsu_hdr->num_adv = htonl(num_lsas);
 
     /* Paso 8: Agregar las LSAs al paquete */
-    ospfv2_lsa_t *lsa = (ospfv2_lsa_t *)(packet + eth_hdr_len + ip_hdr_len + ospf_hdr_len + ospf_lsu_hdr_len);
+    ospfv2_lsa_t *lsa = (ospfv2_lsa_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN + OSPF_LSU_HDR_LEN);
     rt_entry = sr->routing_table;
     int lsa_index = 0;
     while (rt_entry != NULL && lsa_index < num_lsas)
@@ -731,12 +725,12 @@ void *send_lsu(void *arg)
     /* Paso 9: Calcular los checksums */
     /* Checksum del encabezado IP */
     ip_hdr->ip_sum = 0;
-    ip_hdr->ip_sum = cksum(ip_hdr, ip_hdr_len);
+    ip_hdr->ip_sum = ip_cksum(ip_hdr, IP_HDR_LEN);
 
     /* Checksum del encabezado OSPF */
     ospf_hdr->csum = 0;
     uint16_t ospf_packet_len = ntohs(ospf_hdr->len);
-    ospf_hdr->csum = cksum(ospf_hdr, ospf_packet_len);
+    ospf_hdr->csum = ospfv2_cksum(ospf_hdr, ospf_packet_len);
 
     /* Paso 10: Obtener la dirección MAC del vecino mediante ARP */
     /* Dirección IP de destino */
@@ -797,21 +791,16 @@ void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsi
     /* Paso 1: Obtengo información del paquete recibido */
 
     /* Verificar que la longitud del paquete es suficiente */
-    unsigned int eth_hdr_len = sizeof(sr_ethernet_hdr_t);
-    unsigned int ip_hdr_len = sizeof(sr_ip_hdr_t);
-    unsigned int ospf_hdr_len = sizeof(ospfv2_hdr_t);
-    unsigned int ospf_hello_hdr_len = sizeof(ospfv2_hello_hdr_t);
-
-    if (length < eth_hdr_len + ip_hdr_len + ospf_hdr_len + ospf_hello_hdr_len)
+    if (length < ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN + OSPF_HELLO_HDR_LEN)
     {
         Debug("-> PWOSPF: HELLO Packet dropped, insufficient length\n");
         return;
     }
 
     /* Extraer los encabezados */
-    sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + eth_hdr_len);
-    ospfv2_hdr_t *ospf_hdr = (ospfv2_hdr_t *)(packet + eth_hdr_len + ip_hdr_len);
-    ospfv2_hello_hdr_t *ospf_hello_hdr = (ospfv2_hello_hdr_t *)(packet + eth_hdr_len + ip_hdr_len + ospf_hdr_len);
+    sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + ETHER_HDR_LENN);
+    ospfv2_hdr_t *ospf_hdr = (ospfv2_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN);
+    ospfv2_hello_hdr_t *ospf_hello_hdr = (ospfv2_hello_hdr_t *)(packet + ETHER_HDR_LENN + ETHER_HDR_LENN + OSPF_HDR_LEN);
 
     /* Paso 2: Imprimo info del paquete recibido */
     struct in_addr neighbor_id;
@@ -831,32 +820,42 @@ void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsi
     /* Verificar el checksum del encabezado OSPF */
     uint16_t received_checksum = ospf_hdr->csum;
     ospf_hdr->csum = 0;
-    uint16_t calculated_checksum = cksum(ospf_hdr, ntohs(ospf_hdr->len));
+    uint16_t calculated_checksum = ospfv2_cksum(ospf_hdr, ntohs(ospf_hdr->len));
 
     if (received_checksum != calculated_checksum)
     {
         Debug("-> PWOSPF: HELLO Packet dropped, invalid checksum\n");
         return;
     }
-    ospf_hdr->csum = received_checksum;
 
+    ospf_hdr->csum = received_checksum;
+    Debug("-> PWOSPF: HELLO Packet dropped, invalid hello network mask. nmask: %u\n", ospf_hello_hdr->nmask);
     /* Paso 4: Chequeo de la máscara de red */
-    if (ospf_hello_hdr->nmask != rx_if->mask)
+    Debug("-> PWOSPF: HELLO Packet dropped, invalid hello network rx_if mask: %u\n", (uint32_t)rx_if->mask);
+
+    Debug("-> PWOSPF: Por ahora no2\n");
+
+    if (ospf_hello_hdr->nmask != (uint32_t)rx_if->mask)
     {
         Debug("-> PWOSPF: HELLO Packet dropped, invalid hello network mask\n");
         return;
     }
+    Debug("-> PWOSPF: Se rompio2\n");
 
     /* Paso 5: Chequeo del intervalo de HELLO */
-    if (ntohs(ospf_hello_hdr->helloint) != OSPF_DEFAULT_HELLOINT)
+    Debug("-> PWOSPF: Por ahora no3\n");
+    Debug("-> PWOSPF: HELLO Packet dropped, invalid hello network mask. helloint: %u, expected: %d\n", ospf_hello_hdr->helloint, OSPF_DEFAULT_HELLOINT);
+    if (ospf_hello_hdr->helloint != OSPF_DEFAULT_HELLOINT)
     {
         Debug("-> PWOSPF: HELLO Packet dropped, invalid hello interval\n");
         return;
     }
+    Debug("-> PWOSPF: Se rompio3\n");
 
     /* Paso 6: Seteo el vecino en la interfaz por donde llegó y actualizo la lista de vecinos */
-
+    Debug("-> PWOSPF: Por ahora no4\n");
     pwospf_lock(sr->ospf_subsys);
+    Debug("-> PWOSPF: Se rompio4\n");
 
     /* Actualizar el neighbor_id en la interfaz */
     rx_if->neighbor_id = neighbor_id.s_addr;
@@ -929,29 +928,22 @@ void *sr_handle_pwospf_lsu_packet(void *arg)
     unsigned int length = rx_lsu_param->length;
     struct sr_if *rx_if = rx_lsu_param->rx_if;
 
-    /* Paso 1: Extraer los encabezados y verificar la longitud del paquete */
-    unsigned int eth_hdr_len = sizeof(sr_ethernet_hdr_t);
-    unsigned int ip_hdr_len = sizeof(sr_ip_hdr_t);
-    unsigned int ospf_hdr_len = sizeof(ospfv2_hdr_t);
-    unsigned int ospf_lsu_hdr_len = sizeof(ospfv2_lsu_hdr_t);
-    unsigned int lsa_len = sizeof(ospfv2_lsa_t);
-
-    if (length < eth_hdr_len + ip_hdr_len + ospf_hdr_len + ospf_lsu_hdr_len)
+    if (length < ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN + OSPF_LSU_HDR_LEN)
     {
         Debug("-> PWOSPF: LSU Packet dropped, insufficient length\n");
         free(rx_lsu_param);
         return NULL;
     }
 
-    sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + eth_hdr_len);
-    ospfv2_hdr_t *ospf_hdr = (ospfv2_hdr_t *)(packet + eth_hdr_len + ip_hdr_len);
-    ospfv2_lsu_hdr_t *lsu_hdr = (ospfv2_lsu_hdr_t *)(packet + eth_hdr_len + ip_hdr_len + ospf_hdr_len);
-    ospfv2_lsa_t *lsa = (ospfv2_lsa_t *)(packet + eth_hdr_len + ip_hdr_len + ospf_hdr_len + ospf_lsu_hdr_len);
+    sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + ETHER_HDR_LENN);
+    ospfv2_hdr_t *ospf_hdr = (ospfv2_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN);
+    ospfv2_lsu_hdr_t *lsu_hdr = (ospfv2_lsu_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN);
+    ospfv2_lsa_t *lsa = (ospfv2_lsa_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN + OSPF_LSU_HDR_LEN);
 
     /* Paso 2: Verificar el checksum del encabezado OSPF */
     uint16_t received_checksum = ospf_hdr->csum;
     ospf_hdr->csum = 0;
-    uint16_t calculated_checksum = cksum(ospf_hdr, ntohs(ospf_hdr->len));
+    uint16_t calculated_checksum = ospfv2_cksum(ospf_hdr, ntohs(ospf_hdr->len));
     if (received_checksum != calculated_checksum)
     {
         Debug("-> PWOSPF: LSU Packet dropped, invalid checksum\n");
@@ -981,7 +973,7 @@ void *sr_handle_pwospf_lsu_packet(void *arg)
 
     /* Paso 5: Procesar cada LSA en el LSU */
     uint32_t num_lsas = ntohl(lsu_hdr->num_adv);
-    if (length < eth_hdr_len + ip_hdr_len + ospf_hdr_len + ospf_lsu_hdr_len + (num_lsas * lsa_len))
+    if (length < ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN + OSPF_LSU_HDR_LEN + (num_lsas * LSA_LEN))
     {
         Debug("-> PWOSPF: LSU Packet dropped, insufficient length for LSAs\n");
         free(rx_lsu_param);
@@ -1037,11 +1029,11 @@ void *sr_handle_pwospf_lsu_packet(void *arg)
     {
         /* Recalcular checksum OSPF */
         ospf_hdr->csum = 0;
-        ospf_hdr->csum = cksum(ospf_hdr, ntohs(ospf_hdr->len));
+        ospf_hdr->csum = ospfv2_cksum(ospf_hdr, ntohs(ospf_hdr->len));
 
         /* Recalcular checksum IP */
         ip_hdr->ip_sum = 0;
-        ip_hdr->ip_sum = cksum(ip_hdr, ip_hdr->ip_hl * 4);
+        ip_hdr->ip_sum = ip_cksum(ip_hdr, ip_hdr->ip_hl * 4);
 
         /* Enviar el LSU por todas las interfaces excepto por donde llegó */
         struct sr_if *iface = sr->if_list;

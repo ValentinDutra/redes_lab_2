@@ -33,33 +33,33 @@ uint8_t sr_multicast_mac[ETHER_ADDR_LEN];
  *
  *---------------------------------------------------------------------*/
 
-void sr_init(struct sr_instance* sr)
+void sr_init(struct sr_instance *sr)
 {
-    assert(sr);
+  assert(sr);
 
-    /* Inicializa el subsistema OSPF */
-    pwospf_init(sr);
+  /* Inicializa el subsistema OSPF */
+  pwospf_init(sr);
 
-    /* Dirección MAC de multicast OSPF */
-    sr_multicast_mac[0] = 0x01;
-    sr_multicast_mac[1] = 0x00;
-    sr_multicast_mac[2] = 0x5e;
-    sr_multicast_mac[3] = 0x00;
-    sr_multicast_mac[4] = 0x00;
-    sr_multicast_mac[5] = 0x05;
+  /* Dirección MAC de multicast OSPF */
+  sr_multicast_mac[0] = 0x01;
+  sr_multicast_mac[1] = 0x00;
+  sr_multicast_mac[2] = 0x5e;
+  sr_multicast_mac[3] = 0x00;
+  sr_multicast_mac[4] = 0x00;
+  sr_multicast_mac[5] = 0x05;
 
-    /* Inicializa la caché y el hilo de limpieza de la caché */
-    sr_arpcache_init(&(sr->cache));
+  /* Inicializa la caché y el hilo de limpieza de la caché */
+  sr_arpcache_init(&(sr->cache));
 
-    /* Inicializa los atributos del hilo */
-    pthread_attr_init(&(sr->attr));
-    pthread_attr_setdetachstate(&(sr->attr), PTHREAD_CREATE_JOINABLE);
-    pthread_attr_setscope(&(sr->attr), PTHREAD_SCOPE_SYSTEM);
-    pthread_attr_setscope(&(sr->attr), PTHREAD_SCOPE_SYSTEM);
-    pthread_t thread;
+  /* Inicializa los atributos del hilo */
+  pthread_attr_init(&(sr->attr));
+  pthread_attr_setdetachstate(&(sr->attr), PTHREAD_CREATE_JOINABLE);
+  pthread_attr_setscope(&(sr->attr), PTHREAD_SCOPE_SYSTEM);
+  pthread_attr_setscope(&(sr->attr), PTHREAD_SCOPE_SYSTEM);
+  pthread_t thread;
 
-    /* Hilo para gestionar el timeout del caché ARP */
-    pthread_create(&thread, &(sr->attr), sr_arpcache_timeout, sr);
+  /* Hilo para gestionar el timeout del caché ARP */
+  pthread_create(&thread, &(sr->attr), sr_arpcache_timeout, sr);
 
 } /* -- sr_init -- */
 
@@ -192,7 +192,7 @@ uint8_t *build_icmp_error_packet(uint8_t type, uint8_t code, struct sr_if *iface
   ip_hdr->ip_src = iface->ip;
   ip_hdr->ip_dst = ip_dst;
   ip_hdr->ip_sum = 0;
-  ip_hdr->ip_sum = cksum(ip_hdr, IP_HDR_LEN);
+  ip_hdr->ip_sum = ip_cksum(ip_hdr, IP_HDR_LEN);
 
   /* Configurar el encabezado ICMP de error */
   sr_icmp_t3_hdr_t *icmp_hdr = (sr_icmp_t3_hdr_t *)(icmp_packet + ETHER_HDR_LENN + IP_HDR_LEN);
@@ -202,7 +202,7 @@ uint8_t *build_icmp_error_packet(uint8_t type, uint8_t code, struct sr_if *iface
   icmp_hdr->next_mtu = 0;
   memcpy(icmp_hdr->data, orig_ip_hdr, ICMP_DATA_SIZE);
   icmp_hdr->icmp_sum = 0;
-  icmp_hdr->icmp_sum = cksum(icmp_hdr, ICMP_T3_HDR_LEN);
+  icmp_hdr->icmp_sum = icmp3_cksum(icmp_hdr, ICMP_T3_HDR_LEN);
 
   printf("Paquete ICMP de error construido: Tipo %d, Código %d\n", type, code);
 
@@ -262,7 +262,7 @@ void handle_icmp_echo_request(struct sr_instance *sr, uint8_t *packet, unsigned 
   icmpHdr->icmp_type = ICMP_ECHO_REPLY;
   icmpHdr->icmp_code = 0;
   icmpHdr->icmp_sum = 0;
-  icmpHdr->icmp_sum = cksum(icmpHdr, len - ETHER_HDR_LENN - IP_HDR_LEN);
+  icmpHdr->icmp_sum = icmp_cksum(icmpHdr, len - ETHER_HDR_LENN - IP_HDR_LEN);
 
   /* Intercambiar direcciones IP */
   uint32_t tempIP = ipHdr->ip_src;
@@ -271,7 +271,7 @@ void handle_icmp_echo_request(struct sr_instance *sr, uint8_t *packet, unsigned 
 
   /* Recalcular checksum IP */
   ipHdr->ip_sum = 0;
-  ipHdr->ip_sum = cksum(ipHdr, IP_HDR_LEN);
+  ipHdr->ip_sum = ip_cksum(ipHdr, IP_HDR_LEN);
 
   printf("Generando ICMP Echo Reply para %s\n", inet_ntoa(*(struct in_addr *)&ipHdr->ip_dst));
 
@@ -295,6 +295,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
                          char *interface /* lent */,
                          sr_ethernet_hdr_t *eHdr)
 {
+  fprintf(stderr, "Comenzando a manejar paquete IP...\n");
   if (len < ETHER_HDR_LENN + IP_HDR_LEN)
   {
     fprintf(stderr, "Paquete demasiado pequeño. Ignorado.\n");
@@ -307,7 +308,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   /* Verificar checksum IP */
   uint16_t received_cksum = ipHdr->ip_sum;
   ipHdr->ip_sum = 0;
-  uint16_t calculated_cksum = cksum(ipHdr, IP_HDR_LEN);
+  uint16_t calculated_cksum = ip_cksum(ipHdr, IP_HDR_LEN);
 
   if (received_cksum != calculated_cksum)
   {
@@ -318,10 +319,33 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   /* Restaurar checksum */
   ipHdr->ip_sum = received_cksum;
 
+  printf("Chequeando que sea un paquete OSPFv2\n");
+  /* Verificar si el paquete IP es de protocolo OSPFv2 */
+  if (ipHdr->ip_p == 89)
+  {
+    printf("Paquete OSPFv2 recibido\n");
+    struct in_addr hexa_to_addr;
+    hexa_to_addr.s_addr = htonl(OSPF_AllSPFRouters);
+    printf("IP multicast OSPF_AllSPFRouters: %s\n", inet_ntoa(hexa_to_addr));
+    uint32_t multicast_ip;
+    multicast_ip = hexa_to_addr.s_addr;
+    printf("IP multicast OSPF_AllSPFRouters: %d\n", multicast_ip);
+
+    printf("IP destino del paquete OSPFv2: %d\n", ipHdr->ip_dst);
+    if (ipHdr->ip_dst == multicast_ip)
+    {
+      struct sr_if *myInterface = sr_get_interface_given_ip(sr, multicast_ip);
+
+      printf("Paquete OSPFv2 recibido de %s y destinado a la dirección multicast OSPF_AllSPFRouters\n", inet_ntoa(*(struct in_addr *)&ipHdr->ip_src));
+      sr_handle_pwospf_packet(sr, packet, len, myInterface);
+      return;
+    }
+  }
+
   /* Verificar si el paquete IP es para una de mis interfaces */
   struct sr_if *myInterface = sr_get_interface_given_ip(sr, ipHdr->ip_dst);
 
-  if (myInterface != NULL)
+  if (myInterface != 0)
   {
     printf("El paquete está destinado a esta interfaz: %s\n", myInterface->name);
 
@@ -371,7 +395,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     /* Decrementar TTL y recalcular checksum */
     ipHdr->ip_ttl--;
     ipHdr->ip_sum = 0;
-    ipHdr->ip_sum = cksum(ipHdr, IP_HDR_LEN);
+    ipHdr->ip_sum = ip_cksum(ipHdr, IP_HDR_LEN);
 
     struct sr_rt *best_route = find_best_route(sr, ipHdr->ip_dst);
 
@@ -389,50 +413,53 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   printf("Paquete IP manejado correctamente.\n");
 }
 
-/* 
-* ***** A partir de aquí no debería tener que modificar nada ****
-*/
+/*
+ * ***** A partir de aquí no debería tener que modificar nada ****
+ */
 
 /* Envía todos los paquetes IP pendientes de una solicitud ARP */
 void sr_arp_reply_send_pending_packets(struct sr_instance *sr,
-                                        struct sr_arpreq *arpReq,
-                                        uint8_t *dhost,
-                                        uint8_t *shost,
-                                        struct sr_if *iface) {
+                                       struct sr_arpreq *arpReq,
+                                       uint8_t *dhost,
+                                       uint8_t *shost,
+                                       struct sr_if *iface)
+{
 
   struct sr_packet *currPacket = arpReq->packets;
   sr_ethernet_hdr_t *ethHdr;
   uint8_t *copyPacket;
 
-  while (currPacket != NULL) {
-     ethHdr = (sr_ethernet_hdr_t *) currPacket->buf;
-     memcpy(ethHdr->ether_shost, dhost, sizeof(uint8_t) * ETHER_ADDR_LEN);
-     memcpy(ethHdr->ether_dhost, shost, sizeof(uint8_t) * ETHER_ADDR_LEN);
+  while (currPacket != NULL)
+  {
+    ethHdr = (sr_ethernet_hdr_t *)currPacket->buf;
+    memcpy(ethHdr->ether_shost, dhost, sizeof(uint8_t) * ETHER_ADDR_LEN);
+    memcpy(ethHdr->ether_dhost, shost, sizeof(uint8_t) * ETHER_ADDR_LEN);
 
-     copyPacket = malloc(sizeof(uint8_t) * currPacket->len);
-     memcpy(copyPacket, ethHdr, sizeof(uint8_t) * currPacket->len);
+    copyPacket = malloc(sizeof(uint8_t) * currPacket->len);
+    memcpy(copyPacket, ethHdr, sizeof(uint8_t) * currPacket->len);
 
-     print_hdrs(copyPacket, currPacket->len);
-     sr_send_packet(sr, copyPacket, currPacket->len, iface->name);
-     currPacket = currPacket->next;
+    print_hdrs(copyPacket, currPacket->len);
+    sr_send_packet(sr, copyPacket, currPacket->len, iface->name);
+    currPacket = currPacket->next;
   }
 }
 
 /* Gestiona la llegada de un paquete ARP*/
 void sr_handle_arp_packet(struct sr_instance *sr,
-        uint8_t *packet /* lent */,
-        unsigned int len,
-        uint8_t *srcAddr,
-        uint8_t *destAddr,
-        char *interface /* lent */,
-        sr_ethernet_hdr_t *eHdr) {
+                          uint8_t *packet /* lent */,
+                          unsigned int len,
+                          uint8_t *srcAddr,
+                          uint8_t *destAddr,
+                          char *interface /* lent */,
+                          sr_ethernet_hdr_t *eHdr)
+{
 
   /* Imprimo el cabezal ARP */
   printf("*** -> It is an ARP packet. Print ARP header.\n");
   print_hdr_arp(packet + sizeof(sr_ethernet_hdr_t));
 
   /* Obtengo el cabezal ARP */
-  sr_arp_hdr_t *arpHdr = (sr_arp_hdr_t *) (packet + sizeof(sr_ethernet_hdr_t));
+  sr_arp_hdr_t *arpHdr = (sr_arp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
 
   /* Obtengo las direcciones MAC */
   unsigned char senderHardAddr[ETHER_ADDR_LEN], targetHardAddr[ETHER_ADDR_LEN];
@@ -447,11 +474,13 @@ void sr_handle_arp_packet(struct sr_instance *sr,
   /* Verifico si el paquete ARP es para una de mis interfaces */
   struct sr_if *myInterface = sr_get_interface_given_ip(sr, targetIP);
 
-  if (op == arp_op_request) {  /* Si es un request ARP */
+  if (op == arp_op_request)
+  { /* Si es un request ARP */
     printf("**** -> It is an ARP request.\n");
 
     /* Si el ARP request es para una de mis interfaces */
-    if (myInterface != 0) {
+    if (myInterface != 0)
+    {
       printf("***** -> ARP request is for one of my interfaces.\n");
 
       /* Agrego el mapeo MAC->IP del sender a mi caché ARP */
@@ -460,8 +489,8 @@ void sr_handle_arp_packet(struct sr_instance *sr,
 
       /* Construyo un ARP reply y lo envío de vuelta */
       printf("****** -> Construct an ARP reply and send it back.\n");
-      memcpy(eHdr->ether_shost, (uint8_t *) myInterface->addr, sizeof(uint8_t) * ETHER_ADDR_LEN);
-      memcpy(eHdr->ether_dhost, (uint8_t *) senderHardAddr, sizeof(uint8_t) * ETHER_ADDR_LEN);
+      memcpy(eHdr->ether_shost, (uint8_t *)myInterface->addr, sizeof(uint8_t) * ETHER_ADDR_LEN);
+      memcpy(eHdr->ether_dhost, (uint8_t *)senderHardAddr, sizeof(uint8_t) * ETHER_ADDR_LEN);
       memcpy(arpHdr->ar_sha, myInterface->addr, ETHER_ADDR_LEN);
       memcpy(arpHdr->ar_tha, senderHardAddr, ETHER_ADDR_LEN);
       arpHdr->ar_sip = targetIP;
@@ -475,21 +504,22 @@ void sr_handle_arp_packet(struct sr_instance *sr,
     }
 
     printf("******* -> ARP request processing complete.\n");
-
-  } else if (op == arp_op_reply) {  /* Si es un reply ARP */
+  }
+  else if (op == arp_op_reply)
+  { /* Si es un reply ARP */
 
     printf("**** -> It is an ARP reply.\n");
 
     /* Agrego el mapeo MAC->IP del sender a mi caché ARP */
     printf("***** -> Add MAC->IP mapping of sender to my ARP cache.\n");
     struct sr_arpreq *arpReq = sr_arpcache_insert(&(sr->cache), senderHardAddr, senderIP);
-    
-    if (arpReq != NULL) { /* Si hay paquetes pendientes */
 
-    	printf("****** -> Send outstanding packets.\n");
-    	sr_arp_reply_send_pending_packets(sr, arpReq, (uint8_t *) myInterface->addr, (uint8_t *) senderHardAddr, myInterface);
-    	sr_arpreq_destroy(&(sr->cache), arpReq);
+    if (arpReq != NULL)
+    { /* Si hay paquetes pendientes */
 
+      printf("****** -> Send outstanding packets.\n");
+      sr_arp_reply_send_pending_packets(sr, arpReq, (uint8_t *)myInterface->addr, (uint8_t *)senderHardAddr, myInterface);
+      sr_arpreq_destroy(&(sr->cache), arpReq);
     }
     printf("******* -> ARP reply processing complete.\n");
   }
@@ -511,31 +541,35 @@ void sr_handle_arp_packet(struct sr_instance *sr,
  *
  *---------------------------------------------------------------------*/
 
-void sr_handlepacket(struct sr_instance* sr,
-        uint8_t * packet/* lent */,
-        unsigned int len,
-        char* interface/* lent */)
+void sr_handlepacket(struct sr_instance *sr,
+                     uint8_t *packet /* lent */,
+                     unsigned int len,
+                     char *interface /* lent */)
 {
   assert(sr);
   assert(packet);
   assert(interface);
 
-  printf("*** -> Received packet of length %d \n",len);
+  printf("*** -> Received packet of length %d \n", len);
 
   /* Obtengo direcciones MAC origen y destino */
-  sr_ethernet_hdr_t *eHdr = (sr_ethernet_hdr_t *) packet;
+  sr_ethernet_hdr_t *eHdr = (sr_ethernet_hdr_t *)packet;
   uint8_t *destAddr = malloc(sizeof(uint8_t) * ETHER_ADDR_LEN);
   uint8_t *srcAddr = malloc(sizeof(uint8_t) * ETHER_ADDR_LEN);
   memcpy(destAddr, eHdr->ether_dhost, sizeof(uint8_t) * ETHER_ADDR_LEN);
   memcpy(srcAddr, eHdr->ether_shost, sizeof(uint8_t) * ETHER_ADDR_LEN);
   uint16_t pktType = ntohs(eHdr->ether_type);
 
-  if (is_packet_valid(packet, len)) {
-    if (pktType == ethertype_arp) {
+  if (is_packet_valid(packet, len))
+  {
+    if (pktType == ethertype_arp)
+    {
       sr_handle_arp_packet(sr, packet, len, srcAddr, destAddr, interface, eHdr);
-    } else if (pktType == ethertype_ip) {
+    }
+    else if (pktType == ethertype_ip)
+    {
       sr_handle_ip_packet(sr, packet, len, srcAddr, destAddr, interface, eHdr);
     }
   }
 
-}/* end sr_ForwardPacket */
+} /* end sr_ForwardPacket */
