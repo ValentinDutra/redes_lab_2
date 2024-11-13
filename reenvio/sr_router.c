@@ -307,7 +307,7 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   /* Verificar si el paquete IP es para una de mis interfaces */
   struct sr_if *myInterface = sr_get_interface_given_ip(sr, ipHdr->ip_dst);
 
-  if (myInterface != NULL)
+  if (myInterface != 0)
   {
     printf("El paquete está destinado a esta interfaz: %s\n", myInterface->name);
 
