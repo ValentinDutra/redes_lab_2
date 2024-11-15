@@ -103,7 +103,7 @@ uint8_t *build_icmp_error_packet(uint8_t type,
   if (packet == 0)
   {
     Debug("-> ROUTER: Error building ICMP error packet\n");
-    return 0;
+    return NULL;
   }
 
   /* Construir el cabezal Ethernet */
@@ -153,7 +153,9 @@ struct sr_rt *find_best_route(struct sr_instance *sr, uint32_t ipDst)
   int longest_prefix = -1;
   struct sr_rt *rt_entry = sr->routing_table;
 
-  Debug("-> ROUTER: IP destination: %s\n", inet_ntoa(*(struct in_addr *)&ipDst));
+  Debug("-> ROUTER: IP destination: \n");
+  print_addr_ip_int(ipDst);
+
   while (rt_entry)
   {
     uint32_t rt_dest = rt_entry->dest.s_addr;
@@ -195,16 +197,16 @@ void send_packet_to_next_hop(struct sr_instance *sr, uint8_t *packet, unsigned i
   Debug("-> ROUTER: Sending packet to next hop\n");
   sr_ethernet_hdr_t *ethHdr = (sr_ethernet_hdr_t *)packet;
   uint32_t nextHop = (best_route->gw.s_addr != 0) ? best_route->gw.s_addr : ((sr_ip_hdr_t *)(packet + ETHER_HDR_LENN))->ip_dst;
-  struct in_addr next_hop_addr;
-  next_hop_addr.s_addr = nextHop;
 
   struct in_addr dest_ip_addr;
   sr_ip_hdr_t *ip_header = (sr_ip_hdr_t *)(packet + ETHER_HDR_LENN);
   dest_ip_addr.s_addr = ip_header->ip_dst;
 
-  Debug("-> ROUTER: Next hop: %s and other option is: %s\n",
-        inet_ntoa(next_hop_addr),
-        inet_ntoa(dest_ip_addr));
+  Debug("-> ROUTER: Next hop: \n");
+  print_addr_ip_int(nextHop);
+  Debug("\n");
+  Debug("-> ROUTER: Destination IP: \n");
+  print_addr_ip_int(dest_ip_addr.s_addr);
 
   Debug("-> ROUTER: Looking for ARP entry\n");
   struct sr_arpentry *arpEntry = sr_arpcache_lookup(&sr->cache, nextHop);
@@ -215,10 +217,14 @@ void send_packet_to_next_hop(struct sr_instance *sr, uint8_t *packet, unsigned i
     struct sr_if *outInterface = sr_get_interface(sr, best_route->interface);
 
     Debug("-> ROUTER: Outgoing interface: %s\n", outInterface->name);
+
     memcpy(ethHdr->ether_shost, outInterface->addr, ETHER_ADDR_LEN);
     memcpy(ethHdr->ether_dhost, arpEntry->mac, ETHER_ADDR_LEN);
 
-    Debug("-> ROUTER: Sending packet to next hop: %s through of: %s\n", inet_ntoa(*(struct in_addr *)&nextHop), outInterface->name);
+    Debug("-> ROUTER: Sending packet to next hop: \n");
+    print_hdrs(packet, len);
+    Debug("-> ROUTER: Sending packet to interface: %s\n", outInterface->name);
+
     int response;
     response = sr_send_packet(sr, packet, len, outInterface->name);
     free(arpEntry);
@@ -235,6 +241,7 @@ void send_packet_to_next_hop(struct sr_instance *sr, uint8_t *packet, unsigned i
   }
 } /* -- send_packet_to_next_hop -- */
 /* Maneja una solicitud de eco ICMP */
+
 void handle_icmp_echo_request(struct sr_instance *sr,
                               uint8_t *packet /* lent */,
                               unsigned int len)
@@ -252,7 +259,12 @@ void handle_icmp_echo_request(struct sr_instance *sr,
 
   /* Intercambiar direcciones IP */
   Debug("-> ROUTER: Swapping IP addresses\n");
-  Debug("-> ROUTER: IP Source: %s, and IP Destination: %s\n", inet_ntoa(*(struct in_addr *)&ipHdr->ip_src), inet_ntoa(*(struct in_addr *)&ipHdr->ip_dst));
+  Debug("-> ROUTER: IP Source:\n");
+  print_addr_ip_int(ipHdr->ip_src);
+  Debug("\n");
+  Debug("-> ROUTER: IP Destination:\n");
+  print_addr_ip_int(ipHdr->ip_dst);
+
   uint32_t temp = ipHdr->ip_src;
   ipHdr->ip_src = ipHdr->ip_dst;
   ipHdr->ip_dst = temp;
@@ -343,10 +355,10 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   sr_ip_hdr_t *ipHdr = (sr_ip_hdr_t *)(packet + ETHER_HDR_LENN);
 
   /* Obtener direcciones IP */
-  Debug("-> ROUTER: Source IP: ");
+  Debug("-> ROUTER: Source IP: \n");
   print_addr_ip_int(ipHdr->ip_src);
   Debug("\n");
-  Debug("-> ROUTER: Destination IP: ");
+  Debug("-> ROUTER: Destination IP: \n");
   print_addr_ip_int(ipHdr->ip_dst);
 
   /* Verificar checksum */
@@ -375,8 +387,11 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     {
       Debug("-> ROUTER: OSPF packet received\n");
 
-      Debug("-> ROUTER: OSPF packet send by: %s\n", inet_ntoa(*(struct in_addr *)&ipHdr->ip_src));
-      Debug("-> ROUTER: OSPF packet to: %s\n", inet_ntoa(*(struct in_addr *)&ipHdr->ip_dst));
+      Debug("-> ROUTER: OSPF packet send by:\n");
+      print_addr_ip_int(ipHdr->ip_src);
+
+      Debug("-> ROUTER: OSPF packet to:\n");
+      print_addr_ip_int(ipHdr->ip_dst);
 
       Debug("-> ROUTER: Verifying length\n");
       if (len < ETHER_HDR_LENN + IP_HDR_LEN)
@@ -401,13 +416,15 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       struct in_addr dest_addr;
       dest_addr.s_addr = ipHdr->ip_dst;
 
-      struct in_addr multicast_addr;
-      multicast_addr.s_addr = htonl(OSPF_AllSPFRouters);
+      uint32_t multicast_addr = OSPF_AllSPFRouters;
 
-      Debug("-> ROUTER: IP destination: %s, and IP Multicast: %s \n",
-            inet_ntoa(dest_addr),
-            inet_ntoa(multicast_addr));
-      if (ipHdr->ip_dst == htonl(OSPF_AllSPFRouters))
+      Debug("-> ROUTER: IP destination:\n");
+      print_addr_ip_int(dest_addr.s_addr);
+      Debug("\n");
+      Debug("-> ROUTER: Multicast address:\n");
+      print_addr_ip_int(multicast_addr);
+
+      if (ipHdr->ip_dst == multicast_addr)
       {
         Debug("-> ROUTER: IP destination is multicast\n");
         Debug("-> ROUTER: Sending OSPF packet to subsystem, by: %s and to: %s\n", inet_ntoa(*(struct in_addr *)&ipHdr->ip_src), inet_ntoa(*(struct in_addr *)&ipHdr->ip_dst));

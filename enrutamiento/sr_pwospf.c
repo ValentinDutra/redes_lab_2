@@ -40,12 +40,12 @@ pthread_mutex_t g_dijkstra_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 struct in_addr g_router_id;
 uint8_t g_ospf_multicast_mac[ETHER_ADDR_LEN];
-struct ospfv2_neighbor* g_neighbors;
-struct pwospf_topology_entry* g_topology;
+struct ospfv2_neighbor *g_neighbors;
+struct pwospf_topology_entry *g_topology;
 uint16_t g_sequence_num;
 
 /* -- Declaración de hilo principal de la función del subsistema pwospf --- */
-static void* pwospf_run_thread(void* arg);
+static void *pwospf_run_thread(void *arg);
 
 /*---------------------------------------------------------------------
  * Method: pwospf_init(..)
@@ -57,12 +57,12 @@ static void* pwospf_run_thread(void* arg);
  * en este punto.
  *---------------------------------------------------------------------*/
 
-int pwospf_init(struct sr_instance* sr)
+int pwospf_init(struct sr_instance *sr)
 {
     assert(sr);
 
-    sr->ospf_subsys = (struct pwospf_subsys*)malloc(sizeof(struct
-                                                      pwospf_subsys));
+    sr->ospf_subsys = (struct pwospf_subsys *)malloc(sizeof(struct
+                                                            pwospf_subsys));
 
     assert(sr->ospf_subsys);
     pthread_mutex_init(&(sr->ospf_subsys->lock), 0);
@@ -81,21 +81,20 @@ int pwospf_init(struct sr_instance* sr)
 
     g_sequence_num = 0;
 
-
     struct in_addr zero;
     zero.s_addr = 0;
     g_neighbors = create_ospfv2_neighbor(zero);
     g_topology = create_ospfv2_topology_entry(zero, zero, zero, zero, zero, 0);
 
     /* -- start thread subsystem -- */
-    if( pthread_create(&sr->ospf_subsys->thread, 0, pwospf_run_thread, sr)) { 
+    if (pthread_create(&sr->ospf_subsys->thread, 0, pwospf_run_thread, sr))
+    {
         perror("pthread_create");
         assert(0);
     }
 
     return 0; /* success */
 } /* -- pwospf_init -- */
-
 
 /*---------------------------------------------------------------------
  * Method: pwospf_lock
@@ -104,10 +103,12 @@ int pwospf_init(struct sr_instance* sr)
  *
  *---------------------------------------------------------------------*/
 
-void pwospf_lock(struct pwospf_subsys* subsys)
+void pwospf_lock(struct pwospf_subsys *subsys)
 {
-    if ( pthread_mutex_lock(&subsys->lock) )
-    { assert(0); }
+    if (pthread_mutex_lock(&subsys->lock))
+    {
+        assert(0);
+    }
 }
 
 /*---------------------------------------------------------------------
@@ -117,11 +118,13 @@ void pwospf_lock(struct pwospf_subsys* subsys)
  *
  *---------------------------------------------------------------------*/
 
-void pwospf_unlock(struct pwospf_subsys* subsys)
+void pwospf_unlock(struct pwospf_subsys *subsys)
 {
-    if ( pthread_mutex_unlock(&subsys->lock) )
-    { assert(0); }
-} 
+    if (pthread_mutex_unlock(&subsys->lock))
+    {
+        assert(0);
+    }
+}
 
 /*---------------------------------------------------------------------
  * Method: pwospf_run_thread
@@ -130,18 +133,17 @@ void pwospf_unlock(struct pwospf_subsys* subsys)
  *
  *---------------------------------------------------------------------*/
 
-static
-void* pwospf_run_thread(void* arg)
+static void *pwospf_run_thread(void *arg)
 {
     sleep(5);
 
-    struct sr_instance* sr = (struct sr_instance*)arg;
+    struct sr_instance *sr = (struct sr_instance *)arg;
 
     /* Set the ID of the router */
-    while(g_router_id.s_addr == 0)
+    while (g_router_id.s_addr == 0)
     {
-        struct sr_if* int_temp = sr->if_list;
-        while(int_temp != NULL)
+        struct sr_if *int_temp = sr->if_list;
+        while (int_temp != NULL)
         {
             if (int_temp->ip > g_router_id.s_addr)
             {
@@ -154,17 +156,16 @@ void* pwospf_run_thread(void* arg)
     Debug("\n\nPWOSPF: Selecting the highest IP address on a router as the router ID\n");
     Debug("-> PWOSPF: The router ID is [%s]\n", inet_ntoa(g_router_id));
 
-
     Debug("\nPWOSPF: Detecting the router interfaces and adding their networks to the routing table\n");
-    struct sr_if* int_temp = sr->if_list;
-    while(int_temp != NULL)
+    struct sr_if *int_temp = sr->if_list;
+    while (int_temp != NULL)
     {
         struct in_addr ip;
         ip.s_addr = int_temp->ip;
         struct in_addr gw;
         gw.s_addr = 0x00000000;
         struct in_addr mask;
-        mask.s_addr =  int_temp->mask;
+        mask.s_addr = int_temp->mask;
         struct in_addr network;
         network.s_addr = ip.s_addr & mask.s_addr;
 
@@ -176,10 +177,9 @@ void* pwospf_run_thread(void* arg)
         }
         int_temp = int_temp->next;
     }
-    
+
     Debug("\n-> PWOSPF: Printing the forwarding table\n");
     sr_print_routing_table(sr);
-
 
     pthread_create(&g_hello_packet_thread, NULL, send_hellos, sr);
     pthread_create(&g_all_lsu_thread, NULL, send_all_lsu, sr);
@@ -194,6 +194,17 @@ void* pwospf_run_thread(void* arg)
  * SU CÓDIGO DEBERÍA IR AQUÍ
  * *********************************************************************************/
 
+#define OSPF_PROTOCOL_TYPE 89
+#define OSPF_LSU_TIMEOUT 30
+
+#define OSPF_HDR_LEN sizeof(ospfv2_hdr_t)
+#define OSPF_HELLO_HDR_LEN sizeof(ospfv2_hello_hdr_t)
+#define IP_HDR_LEN sizeof(sr_ip_hdr_t)
+#define ETHER_HDR_LENN sizeof(sr_ethernet_hdr_t)
+#define OSPF_LSU_HDR_LEN sizeof(ospfv2_lsu_hdr_t)
+#define LSA_LEN sizeof(ospfv2_lsa_t)
+#define ETHERTYPE_IP 0x0800
+
 /*---------------------------------------------------------------------
  * Method: check_neighbors_life
  *
@@ -201,30 +212,29 @@ void* pwospf_run_thread(void* arg)
  *
  *---------------------------------------------------------------------*/
 
-void* check_neighbors_life(void* arg)
+void *check_neighbors_life(void *arg)
 {
-    struct sr_instance* sr = (struct sr_instance*)arg;
-    /* 
+    struct sr_instance *sr = (struct sr_instance *)arg;
+    /*
     Cada 1 segundo, chequea la lista de vecinos.
     Si hay un cambio, se debe ajustar el neighbor id en la interfaz.
     */
     return NULL;
 } /* -- check_neighbors_life -- */
 
-
 /*---------------------------------------------------------------------
  * Method: check_topology_entries_age
  *
- * Check if the topology entries are alive 
+ * Check if the topology entries are alive
  * and if they are not, remove them from the topology table
  *
  *---------------------------------------------------------------------*/
 
-void* check_topology_entries_age(void* arg)
+void *check_topology_entries_age(void *arg)
 {
-    struct sr_instance* sr = (struct sr_instance*)arg;
+    struct sr_instance *sr = (struct sr_instance *)arg;
 
-    /* 
+    /*
     Cada 1 segundo, chequea el tiempo de vida de cada entrada
     de la topologia.
     Si hay un cambio en la topología, se llama a la función de Dijkstra
@@ -235,21 +245,29 @@ void* check_topology_entries_age(void* arg)
     return NULL;
 } /* -- check_topology_entries_age -- */
 
-
 /*---------------------------------------------------------------------
  * Method: send_hellos
  *
- * Para cada interfaz y cada helloint segundos, construye mensaje 
+ * Para cada interfaz y cada helloint segundos, construye mensaje
  * HELLO y crea un hilo con la función para enviar el mensaje.
  *
  *---------------------------------------------------------------------*/
 
-void* send_hellos(void* arg)
+void *send_hellos(void *arg)
 {
-    struct sr_instance* sr = (struct sr_instance*)arg;
+    Debug("\nPWOSPF: Starting to send HELLOs\n");
+    struct sr_instance *sr = (struct sr_instance *)arg;
 
+    Debug("\nPWOSPF: Counting the number of interfaces\n");
+    struct sr_if *iface;
+    int num_interfaces = 0;
+    for (iface = sr->if_list; iface != NULL; iface = iface->next)
+    {
+        num_interfaces++;
+    }
+    Debug("-> PWOSPF: Number of interfaces = %d\n", num_interfaces);
     /* While true */
-    while(1)
+    while (1)
     {
         /* Se ejecuta cada 1 segundo */
         usleep(1000000);
@@ -258,16 +276,35 @@ void* send_hellos(void* arg)
         pwospf_lock(sr->ospf_subsys);
 
         /* Chequeo todas las interfaces para enviar el paquete HELLO */
+        for (iface = sr->if_list; iface != NULL; iface = iface->next)
+        {
             /* Cada interfaz matiene un contador en segundos para los HELLO*/
-            /* Reiniciar el contador de segundos para HELLO */
+            if (iface->helloint > OSPF_DEFAULT_HELLOINT)
+            {
+                iface->helloint++;
+                powspf_hello_lsu_param_t *hello_param = (powspf_hello_lsu_param_t *)malloc(sizeof(powspf_hello_lsu_param_t));
+                hello_param->sr = sr;
+                hello_param->interface = iface;
+
+                pthread_t hello_thread;
+                pthread_create(&hello_thread, NULL, send_hello_packet, hello_param);
+                pthread_detach(hello_thread);
+                /* Reiniciar el contador de segundos para HELLO */
+                iface->helloint = 0;
+            }
+            else
+            {
+                iface->helloint++;
+            }
+        }
 
         /* Desbloqueo */
         pwospf_unlock(sr->ospf_subsys);
+        Debug("-> PWOSPF: HELLOs sent\n");
     };
 
     return NULL;
 } /* -- send_hellos -- */
-
 
 /*---------------------------------------------------------------------
  * Method: send_hello_packet
@@ -277,43 +314,117 @@ void* send_hellos(void* arg)
  *
  *---------------------------------------------------------------------*/
 
-void* send_hello_packet(void* arg)
+void *send_hello_packet(void *arg)
 {
-    powspf_hello_lsu_param_t* hello_param = ((powspf_hello_lsu_param_t*)(arg));
+    powspf_hello_lsu_param_t *hello_param = ((powspf_hello_lsu_param_t *)(arg));
 
     Debug("\n\nPWOSPF: Constructing HELLO packet for interface %s: \n", hello_param->interface->name);
-    
+
+    /* Inicializo cabezal Ethernet */
+    Debug("-> PWOSPF: Packet length\n");
+    unsigned int packet_len;
+    packet_len = ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN + OSPF_HELLO_HDR_LEN;
+
+    Debug("-> PWOSPF: Creating packet\n");
+    uint8_t *packet;
+    packet = (uint8_t *)malloc(packet_len);
+    if (packet == 0)
+    {
+        Debug("-> PWOSPF: Error creating packet\n");
+        return NULL;
+    }
+    Debug("-> PWOSPF: Packet created\n");
+    memset(packet, 0, packet_len);
+
+    Debug("-> PWOSPF: Setting Ethernet header\n");
+    sr_ethernet_hdr_t *eth_hdr = (sr_ethernet_hdr_t *)packet;
+
     /* Seteo la dirección MAC de multicast para la trama a enviar */
+    Debug("-> PWOSPF: Setting MAC address\n");
+    memcpy(eth_hdr->ether_dhost, g_ospf_multicast_mac, ETHER_ADDR_LEN);
+
     /* Seteo la dirección MAC origen con la dirección de mi interfaz de salida */
+    Debug("-> PWOSPF: Setting source MAC address\n");
+    memcpy(eth_hdr->ether_shost, hello_param->interface->addr, ETHER_ADDR_LEN);
+
     /* Seteo el ether_type en el cabezal Ethernet */
+    Debug("-> PWOSPF: Setting ether_type\n");
+    eth_hdr->ether_type = htons(ETHERTYPE_IP);
 
     /* Inicializo cabezal IP */
-    /* Seteo el protocolo en el cabezal IP para ser el de OSPF (89) */
-    /* Seteo IP origen con la IP de mi interfaz de salida */
-    /* Seteo IP destino con la IP de Multicast dada: OSPF_AllSPFRouters  */
-    /* Calculo y seteo el chechsum IP*/
-    
-    /* Inicializo cabezal de PWOSPF con version 2 y tipo HELLO */
-    
-    /* Seteo el Router ID con mi ID*/
-    /* Seteo el Area ID en 0 */
-    /* Seteo el Authentication Type y Authentication Data en 0*/
-    /* Seteo máscara con la máscara de mi interfaz de salida */
-    /* Seteo Hello Interval con OSPF_DEFAULT_HELLOINT */
-    /* Seteo Padding en 0*/
+    Debug("-> PWOSPF: Setting IP header\n");
+    sr_ip_hdr_t *ip_hdr = (sr_ip_hdr_t *)(packet + ETHER_HDR_LENN);
 
-    /* Creo el paquete a transmitir */
-   
+    /* Seteo el protocolo en el cabezal IP para ser el de OSPF (89) */
+    Debug("-> PWOSPF: Setting IP protocol\n");
+    ip_hdr->ip_p = OSPF_PROTOCOL_TYPE;
+
+    /* Seteo IP origen con la IP de mi interfaz de salida */
+    Debug("-> PWOSPF: Setting IP source\n");
+    uint32_t reorganize_source_ip_bytes = htonl(hello_param->interface->ip);
+    ip_hdr->ip_src = reorganize_source_ip_bytes;
+
+    /* Seteo IP destino con la IP de Multicast dada: OSPF_AllSPFRouters  */
+    Debug("-> PWOSPF: Setting IP destination\n");
+    ip_hdr->ip_dst = OSPF_AllSPFRouters;
+
+    /* Calculo y seteo el chechsum IP*/
+    Debug("-> PWOSPF: Calculating IP checksum\n");
+    ip_hdr->ip_sum = 0;
+    ip_hdr->ip_sum = cksum((uint8_t *)ip_hdr, IP_HDR_LEN);
+
+    /* Inicializo cabezal de PWOSPF con version 2 y tipo HELLO */
+    Debug("-> PWOSPF: Setting OSPF header\n");
+    ospfv2_hdr_t *ospf_hdr = (ospfv2_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN);
+    ospf_hdr->version = OSPF_V2;
+    ospf_hdr->type = OSPF_TYPE_HELLO;
+
+    /* Seteo el Router ID con mi ID*/
+    Debug("-> PWOSPF: Setting Router ID\n");
+    ospf_hdr->rid = g_router_id.s_addr;
+
+    /* Seteo el Area ID en 0 */
+    Debug("-> PWOSPF: Setting Area ID\n");
+    ospf_hdr->aid = 0;
+    /* Seteo el Authentication Type y Authentication Data en 0*/
+    Debug("-> PWOSPF: Setting Authentication Type and Data\n");
+    ospf_hdr->autype = 0;
+    ospf_hdr->audata = 0;
+
+    Debug("-> PWOSPF: Setting OSPF header \n");
+    ospfv2_hello_hdr_t *ospf_hello_hdr = (ospfv2_hello_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN);
+    /* Seteo máscara con la máscara de mi interfaz de salida */
+    Debug("-> PWOSPF: Setting Mask\n");
+    ospf_hello_hdr->nmask = hello_param->interface->mask;
+
+    /* Seteo Hello Interval con OSPF_DEFAULT_HELLOINT */
+    Debug("-> PWOSPF: Setting Hello Interval\n");
+    ospf_hello_hdr->helloint = OSPF_DEFAULT_HELLOINT;
+
+    /* Seteo Padding en 0*/
+    Debug("-> PWOSPF: Setting Padding\n");
+    ospf_hello_hdr->padding = 0;
+
     /* Calculo y actualizo el checksum del cabezal OSPF */
+    Debug("-> PWOSPF: Calculating OSPF checksum\n");
+    ospf_hdr->csum = 0;
+    ospf_hdr->csum = cksum((uint8_t *)ospf_hdr, OSPF_HDR_LEN + OSPF_HELLO_HDR_LEN);
 
     /* Envío el paquete HELLO */
+    Debug("-> PWOSPF: Sending HELLO Packet\n");
+    int response;
+    response = sr_send_packet(hello_param->sr, packet, packet_len, hello_param->interface->name);
+    (response == 0) ? Debug("-> PWOSPF: HELLO Packet sent\n") : Debug("-> PWOSPF: HELLO Packet not sent\n");
     /* Imprimo información del paquete HELLO enviado */
-    /*
+
     Debug("-> PWOSPF: Sending HELLO Packet of length = %d, out of the interface: %s\n", packet_len, hello_param->interface->name);
     Debug("      [Router ID = %s]\n", inet_ntoa(g_router_id));
-    Debug("      [Router IP = %s]\n", inet_ntoa(ip));
-    Debug("      [Network Mask = %s]\n", inet_ntoa(mask));
-    */
+    struct in_addr ip_addr;
+    ip_addr.s_addr = hello_param->interface->ip;
+    Debug("      [Router IP = %s]\n", inet_ntoa(ip_addr));
+    struct in_addr mask_addr;
+    mask_addr.s_addr = hello_param->interface->mask;
+    Debug("      [Network Mask = %s]\n", inet_ntoa(mask_addr));
 
     return NULL;
 } /* -- send_hello_packet -- */
@@ -325,21 +436,21 @@ void* send_hello_packet(void* arg)
  *
  *---------------------------------------------------------------------*/
 
-void* send_all_lsu(void* arg)
+void *send_all_lsu(void *arg)
 {
-    struct sr_instance* sr = (struct sr_instance*)arg;
+    struct sr_instance *sr = (struct sr_instance *)arg;
 
     /* while true*/
-    while(1)
+    while (1)
     {
         /* Se ejecuta cada OSPF_DEFAULT_LSUINT segundos */
         usleep(OSPF_DEFAULT_LSUINT * 1000000);
 
         /* Bloqueo para evitar mezclar el envío de HELLOs y LSUs */
         pwospf_lock(sr->ospf_subsys);
-        
+
         /* Recorro todas las interfaces para enviar el paquete LSU */
-            /* Si la interfaz tiene un vecino, envío un LSU */
+        /* Si la interfaz tiene un vecino, envío un LSU */
 
         /* Desbloqueo */
         pwospf_unlock(sr->ospf_subsys);
@@ -355,12 +466,12 @@ void* send_all_lsu(void* arg)
  *
  *---------------------------------------------------------------------*/
 
-void* send_lsu(void* arg)
+void *send_lsu(void *arg)
 {
-    powspf_hello_lsu_param_t* lsu_param = ((powspf_hello_lsu_param_t*)(arg));
+    powspf_hello_lsu_param_t *lsu_param = ((powspf_hello_lsu_param_t *)(arg));
 
     /* Solo envío LSUs si del otro lado hay un router*/
-    
+
     /* Construyo el LSU */
     Debug("\n\nPWOSPF: Constructing LSU packet\n");
 
@@ -369,7 +480,7 @@ void* send_lsu(void* arg)
 
     /* Inicializo cabezal IP*/
     /* La IP destino es la del vecino contectado a mi interfaz*/
-   
+
     /* Inicializo cabezal de OSPF*/
 
     /* Seteo el número de secuencia y avanzo*/
@@ -379,19 +490,18 @@ void* send_lsu(void* arg)
     /* Creo el paquete y seteo todos los cabezales del paquete a transmitir */
 
     /* Creo cada LSA iterando en las enttadas de la tabla */
-        /* Solo envío entradas directamente conectadas y agreagadas a mano*/
-        /* Creo LSA con subnet, mask y routerID (id del vecino de la interfaz)*/
+    /* Solo envío entradas directamente conectadas y agreagadas a mano*/
+    /* Creo LSA con subnet, mask y routerID (id del vecino de la interfaz)*/
 
     /* Calculo el checksum del paquete LSU */
 
     /* Me falta la MAC para poder enviar el paquete, la busco en la cache ARP*/
     /* Envío el paquete si obtuve la MAC o lo guardo en la cola para cuando tenga la MAC*/
-   
-   /* Libero memoria */
+
+    /* Libero memoria */
 
     return NULL;
 } /* -- send_lsu -- */
-
 
 /*---------------------------------------------------------------------
  * Method: sr_handle_pwospf_hello_packet
@@ -400,7 +510,7 @@ void* send_lsu(void* arg)
  *
  *---------------------------------------------------------------------*/
 
-void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsigned int length, struct sr_if* rx_if)
+void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsigned int length, struct sr_if *rx_if)
 {
     /* Obtengo información del paquete recibido */
     /* Imprimo info del paquete recibido*/
@@ -412,22 +522,21 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
     */
 
     /* Chequeo checksum */
-        /*Debug("-> PWOSPF: HELLO Packet dropped, invalid checksum\n");*/
+    /*Debug("-> PWOSPF: HELLO Packet dropped, invalid checksum\n");*/
 
     /* Chequeo de la máscara de red */
-        /*Debug("-> PWOSPF: HELLO Packet dropped, invalid hello network mask\n");*/
+    /*Debug("-> PWOSPF: HELLO Packet dropped, invalid hello network mask\n");*/
 
     /* Chequeo del intervalo de HELLO */
-        /*Debug("-> PWOSPF: HELLO Packet dropped, invalid hello interval\n");*/
+    /*Debug("-> PWOSPF: HELLO Packet dropped, invalid hello interval\n");*/
 
     /* Seteo el vecino en la interfaz por donde llegó y actualizo la lista de vecinos */
 
     /* Si es un nuevo vecino, debo enviar LSUs por todas mis interfaces*/
-        /* Recorro todas las interfaces para enviar el paquete LSU */
-        /* Si la interfaz tiene un vecino, envío un LSU */
+    /* Recorro todas las interfaces para enviar el paquete LSU */
+    /* Si la interfaz tiene un vecino, envío un LSU */
 
 } /* -- sr_handle_pwospf_hello_packet -- */
-
 
 /*---------------------------------------------------------------------
  * Method: sr_handle_pwospf_lsu_packet
@@ -437,36 +546,36 @@ void sr_handle_pwospf_hello_packet(struct sr_instance* sr, uint8_t* packet, unsi
  *
  *---------------------------------------------------------------------*/
 
-void* sr_handle_pwospf_lsu_packet(void* arg)
+void *sr_handle_pwospf_lsu_packet(void *arg)
 {
-    powspf_rx_lsu_param_t* rx_lsu_param = ((powspf_rx_lsu_param_t*)(arg));
+    powspf_rx_lsu_param_t *rx_lsu_param = ((powspf_rx_lsu_param_t *)(arg));
 
     /* Obtengo el vecino que me envió el LSU*/
     /* Imprimo info del paquete recibido*/
     /*
     Debug("-> PWOSPF: Detecting LSU Packet from [Neighbor ID = %s, IP = %s]\n", inet_ntoa(next_hop_id), inet_ntoa(next_hop_ip));
     */
-    
+
     /* Chequeo checksum */
-        /*Debug("-> PWOSPF: LSU Packet dropped, invalid checksum\n");*/
+    /*Debug("-> PWOSPF: LSU Packet dropped, invalid checksum\n");*/
 
     /* Obtengo el Router ID del router originario del LSU y chequeo si no es mío*/
-        /*Debug("-> PWOSPF: LSU Packet dropped, originated by this router\n");*/
+    /*Debug("-> PWOSPF: LSU Packet dropped, originated by this router\n");*/
 
     /* Obtengo el número de secuencia y uso check_sequence_number para ver si ya lo recibí desde ese vecino*/
-        /*Debug("-> PWOSPF: LSU Packet dropped, repeated sequence number\n");*/
+    /*Debug("-> PWOSPF: LSU Packet dropped, repeated sequence number\n");*/
 
     /* Itero en los LSA que forman parte del LSU. Para cada uno, actualizo la topología.*/
-    /*Debug("-> PWOSPF: Processing LSAs and updating topology table\n");*/        
-        /* Obtengo subnet */
-        /* Obtengo vecino */
-        /* Imprimo info de la entrada de la topología */
-        /*
-        Debug("      [Subnet = %s]", inet_ntoa(net_num));
-        Debug("      [Mask = %s]", inet_ntoa(net_mask));
-        Debug("      [Neighbor ID = %s]\n", inet_ntoa(neighbor_id));
-        */
-        /* LLamo a refresh_topology_entry*/
+    /*Debug("-> PWOSPF: Processing LSAs and updating topology table\n");*/
+    /* Obtengo subnet */
+    /* Obtengo vecino */
+    /* Imprimo info de la entrada de la topología */
+    /*
+    Debug("      [Subnet = %s]", inet_ntoa(net_num));
+    Debug("      [Mask = %s]", inet_ntoa(net_mask));
+    Debug("      [Neighbor ID = %s]\n", inet_ntoa(neighbor_id));
+    */
+    /* LLamo a refresh_topology_entry*/
 
     /* Imprimo la topología */
     /*
@@ -474,15 +583,14 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
     print_topolgy_table(g_topology);
     */
 
-
     /* Ejecuto Dijkstra en un nuevo hilo (run_dijkstra)*/
 
     /* Flooding del LSU por todas las interfaces menos por donde me llegó */
-            /* Seteo MAC de origen */
-            /* Ajusto paquete IP, origen y checksum*/
-            /* Ajusto cabezal OSPF: checksum y TTL*/
-            /* Envío el paquete*/
-            
+    /* Seteo MAC de origen */
+    /* Ajusto paquete IP, origen y checksum*/
+    /* Ajusto cabezal OSPF: checksum y TTL*/
+    /* Envío el paquete*/
+
     return NULL;
 } /* -- sr_handle_pwospf_lsu_packet -- */
 
@@ -497,38 +605,39 @@ void* sr_handle_pwospf_lsu_packet(void* arg)
  *
  *---------------------------------------------------------------------*/
 
-void sr_handle_pwospf_packet(struct sr_instance* sr, uint8_t* packet, unsigned int length, struct sr_if* rx_if)
+void sr_handle_pwospf_packet(struct sr_instance *sr, uint8_t *packet, unsigned int length, struct sr_if *rx_if)
 {
     /*Si aún no terminó la inicialización, se descarta el paquete recibido*/
-    if (g_router_id.s_addr == 0) {
-       return;
+    if (g_router_id.s_addr == 0)
+    {
+        return;
     }
 
-    ospfv2_hdr_t* rx_ospfv2_hdr = ((ospfv2_hdr_t*)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)));
-    powspf_rx_lsu_param_t* rx_lsu_param = ((powspf_rx_lsu_param_t*)(malloc(sizeof(powspf_rx_lsu_param_t))));
+    ospfv2_hdr_t *rx_ospfv2_hdr = ((ospfv2_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t) + sizeof(sr_ip_hdr_t)));
+    powspf_rx_lsu_param_t *rx_lsu_param = ((powspf_rx_lsu_param_t *)(malloc(sizeof(powspf_rx_lsu_param_t))));
 
     Debug("-> PWOSPF: Detecting PWOSPF Packet\n");
     Debug("      [Type = %d]\n", rx_ospfv2_hdr->type);
 
-    switch(rx_ospfv2_hdr->type)
+    switch (rx_ospfv2_hdr->type)
     {
-        case OSPF_TYPE_HELLO:
-            sr_handle_pwospf_hello_packet(sr, packet, length, rx_if);
-            break;
-        case OSPF_TYPE_LSU:
-            rx_lsu_param->sr = sr;
-            unsigned int i;
-            for (i = 0; i < length; i++)
-            {
-                rx_lsu_param->packet[i] = packet[i];
-            }
-            rx_lsu_param->length = length;
-            rx_lsu_param->rx_if = rx_if;
-            pthread_attr_t attr;
-            pthread_attr_init(&attr);
-            pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-            pthread_t pid;
-            pthread_create(&pid, &attr, sr_handle_pwospf_lsu_packet, rx_lsu_param);
-            break;
+    case OSPF_TYPE_HELLO:
+        sr_handle_pwospf_hello_packet(sr, packet, length, rx_if);
+        break;
+    case OSPF_TYPE_LSU:
+        rx_lsu_param->sr = sr;
+        unsigned int i;
+        for (i = 0; i < length; i++)
+        {
+            rx_lsu_param->packet[i] = packet[i];
+        }
+        rx_lsu_param->length = length;
+        rx_lsu_param->rx_if = rx_if;
+        pthread_attr_t attr;
+        pthread_attr_init(&attr);
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        pthread_t pid;
+        pthread_create(&pid, &attr, sr_handle_pwospf_lsu_packet, rx_lsu_param);
+        break;
     }
 } /* -- sr_handle_pwospf_packet -- */
