@@ -361,8 +361,7 @@ void *send_hello_packet(void *arg)
 
     /* Seteo IP origen con la IP de mi interfaz de salida */
     Debug("-> PWOSPF: Setting IP source\n");
-    uint32_t reorganize_source_ip_bytes = htonl(hello_param->interface->ip);
-    ip_hdr->ip_src = reorganize_source_ip_bytes;
+    ip_hdr->ip_src = hello_param->interface->ip;
 
     /* Seteo IP destino con la IP de Multicast dada: OSPF_AllSPFRouters  */
     Debug("-> PWOSPF: Setting IP destination\n");
@@ -421,12 +420,16 @@ void *send_hello_packet(void *arg)
     (response == 0) ? Debug("-> PWOSPF: HELLO Packet sent\n") : Debug("-> PWOSPF: HELLO Packet not sent\n");
 
     /* Imprimo información del paquete HELLO enviado */
+    struct in_addr rid_addr;
+    rid_addr.s_addr = htonl(ospf_hdr->rid);
+
     struct in_addr ip_addr;
     ip_addr.s_addr = hello_param->interface->ip;
+
     struct in_addr mask_addr;
     mask_addr.s_addr = hello_param->interface->mask;
     Debug("-> PWOSPF: Sending HELLO Packet of length = %d, out of the interface: %s\n", packet_len, hello_param->interface->name);
-    Debug("      [Router ID = %s]\n", htons(ospf_hdr->rid));
+    Debug("      [Router ID = %s]\n", inet_ntoa(rid_addr));
     Debug("      [Router IP = %s]\n", inet_ntoa(ip_addr));
     Debug("      [Network Mask = %s]\n", inet_ntoa(mask_addr));
 
@@ -519,6 +522,7 @@ void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsi
     Debug("-> PWOSPF: Detecting PWOSPF HELLO Packet\n");
     /* Obtengo información del paquete recibido */
     ospfv2_hdr_t *rx_ospfv2_hdr = ((ospfv2_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN));
+    sr_ip_hdr_t *rx_ip_hdr = (sr_ip_hdr_t *)(packet + ETHER_HDR_LENN);
     ospfv2_hello_hdr_t *rx_ospfv2_hello_hdr = ((ospfv2_hello_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN));
     /* Imprimo info del paquete recibido*/
     uint32_t neighbor_id = rx_ospfv2_hdr->rid;
@@ -526,7 +530,7 @@ void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsi
     neighbor_id_addr.s_addr = neighbor_id;
 
     struct in_addr neighbor_ip;
-    neighbor_ip.s_addr = rx_if->ip;
+    neighbor_ip.s_addr = rx_ip_hdr->ip_src;
 
     struct in_addr net_mask;
     net_mask.s_addr = rx_ospfv2_hello_hdr->nmask;
@@ -545,20 +549,63 @@ void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsi
     uint16_t calculated_cksum = ospfv2_cksum(rx_ospfv2_hdr, packet_len_wo_eth_ip_hdrs);
     if (received_cksum != calculated_cksum)
     {
+        /*Debug("-> PWOSPF: HELLO Packet dropped, invalid checksum\n");*/
         Debug("-> PWOSPF: HELLO Packet dropped, invalid checksum\n");
         return;
     }
     Debug("-> PWOSPF: HELLO Packet checksum correct\n");
 
-    /*Debug("-> PWOSPF: HELLO Packet dropped, invalid checksum\n");*/
     /* Chequeo de la máscara de red */
-    /*Debug("-> PWOSPF: HELLO Packet dropped, invalid hello network mask\n");*/
+    Debug("-> PWOSPF: Checking network mask\n");
+    if (rx_ospfv2_hello_hdr->nmask != rx_if->mask)
+    {
+        /*Debug("-> PWOSPF: HELLO Packet dropped, invalid hello network mask\n");*/
+        Debug("-> PWOSPF: HELLO Packet dropped, invalid hello network mask\n");
+        return;
+    }
+    Debug("-> PWOSPF: HELLO Packet network mask correct\n");
 
     /* Chequeo del intervalo de HELLO */
-    /*Debug("-> PWOSPF: HELLO Packet dropped, invalid hello interval\n");*/
+    Debug("-> PWOSPF: Checking hello interval\n");
+    if (rx_ospfv2_hello_hdr->helloint != OSPF_DEFAULT_HELLOINT)
+    {
+        /*Debug("-> PWOSPF: HELLO Packet dropped, invalid hello interval\n");*/
+        Debug("-> PWOSPF: HELLO Packet dropped, invalid hello interval\n");
+        return;
+    }
+    Debug("-> PWOSPF: HELLO Packet hello interval correct\n");
 
     /* Seteo el vecino en la interfaz por donde llegó y actualizo la lista de vecinos */
+    Debug("-> PWOSPF: Setting neighbor in interface\n");
+    char isNew = 0;
+    if (rx_if->neighbor_id == 0)
+    {
+        Debug("-> PWOSPF: New neighbor\n");
+        isNew = 1;
+    }
+    rx_if->neighbor_ip = htonl(neighbor_ip.s_addr);
+    rx_if->neighbor_id = neighbor_id;
+    rx_if->helloint = OSPF_DEFAULT_HELLOINT;
 
+    refresh_neighbors_alive(g_neighbors, neighbor_id_addr);
+
+    struct in_addr net_num;
+    net_num.s_addr = rx_if->ip & rx_if->mask;
+
+    struct in_addr mask_addr;
+    mask_addr.s_addr = rx_if->mask;
+
+    struct in_addr ip_addr;
+    ip_addr.s_addr = rx_if->ip;
+
+    refresh_topology_entry(g_topology, g_router_id, net_num, mask_addr, neighbor_id_addr, neighbor_id_addr, g_sequence_num);
+
+    if (isNew)
+    {
+        /* Imprimo la lista de vecinos */
+        Debug("\n-> PWOSPF: Printing the neighbors list\n");
+        print_topolgy_table(g_topology);
+    }
     /* Si es un nuevo vecino, debo enviar LSUs por todas mis interfaces*/
     /* Recorro todas las interfaces para enviar el paquete LSU */
     /* Si la interfaz tiene un vecino, envío un LSU */
