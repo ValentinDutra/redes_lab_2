@@ -608,6 +608,7 @@ void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsi
         struct sr_if *iface;
         for (iface = sr->if_list; iface != NULL; iface = iface->next)
         {
+            /* Si la interfaz tiene un vecino, envío un LSU */
             if (iface != rx_if && iface->neighbor_id != 0)
             {
                 powspf_hello_lsu_param_t *lsu_param = (powspf_hello_lsu_param_t *)malloc(sizeof(powspf_hello_lsu_param_t));
@@ -619,7 +620,6 @@ void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsi
                 pthread_detach(lsu_thread);
             }
         }
-        /* Si la interfaz tiene un vecino, envío un LSU */
         Debug("\n-> PWOSPF: Printing the neighbors list\n");
         print_topolgy_table(g_topology);
     }
