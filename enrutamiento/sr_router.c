@@ -127,7 +127,10 @@ uint8_t *build_icmp_error_packet(uint8_t type,
   ip_hdr->ip_src = outInterface->ip;
   ip_hdr->ip_dst = ipDst;
   ip_hdr->ip_sum = 0;
-  ip_hdr->ip_sum = ip_cksum(ip_hdr, IP_HDR_LEN);
+
+  uint16_t packet_len_wo_hdrs;
+  packet_len_wo_hdrs = len - ETHER_HDR_LENN;  
+  ip_hdr->ip_sum = ip_cksum(ip_hdr, packet_len_wo_hdrs);
 
   /* Construir el cabezal ICMP */
   Debug("-> ROUTER: Building ICMP header\n");
@@ -138,7 +141,10 @@ uint8_t *build_icmp_error_packet(uint8_t type,
   icmp_hdr->next_mtu = 0;
   memcpy(icmp_hdr->data, ipHdr, ICMP_DATA_SIZE);
   icmp_hdr->icmp_sum = 0;
-  icmp_hdr->icmp_sum = icmp3_cksum(icmp_hdr, ICMP_T3_HDR_LEN);
+
+  uint16_t packet_len_wo_eth_ip_hdrs;
+  packet_len_wo_eth_ip_hdrs = len - ETHER_HDR_LENN - IP_HDR_LEN;
+  icmp_hdr->icmp_sum = icmp3_cksum(icmp_hdr, packet_len_wo_eth_ip_hdrs);
 
   Debug("-> ROUTER: ICMP error packet created: Type %d, Code %d\n", type, code);
   print_hdrs(packet, *len);
@@ -255,7 +261,9 @@ void handle_icmp_echo_request(struct sr_instance *sr,
   icmpHdr->icmp_type = ICMP_ECHO_REPLY;
   icmpHdr->icmp_code = ICMP_ECHO_REPLY;
   icmpHdr->icmp_sum = 0;
-  icmpHdr->icmp_sum = icmp_cksum(icmpHdr, len - ETHER_HDR_LENN - IP_HDR_LEN);
+  uint16_t packet_len_wo_eth_ip_hdrs;
+  packet_len_wo_eth_ip_hdrs = len - ETHER_HDR_LENN - IP_HDR_LEN;
+  icmpHdr->icmp_sum = icmp_cksum(icmpHdr, packet_len_wo_eth_ip_hdrs);
 
   /* Intercambiar direcciones IP */
   Debug("-> ROUTER: Swapping IP addresses\n");
@@ -365,7 +373,9 @@ void sr_handle_ip_packet(struct sr_instance *sr,
   Debug("-> ROUTER: Verifying IP checksum\n");
   uint16_t received_cksum = ipHdr->ip_sum;
   ipHdr->ip_sum = 0;
-  uint16_t calculated_cksum = ip_cksum(ipHdr, IP_HDR_LEN);
+  uint16_t packet_len_wo_eth_hdrs;
+  packet_len_wo_eth_hdrs = len - ETHER_HDR_LENN;
+  uint16_t calculated_cksum = ip_cksum(ipHdr, packet_len_wo_eth_hdrs);
 
   if (received_cksum != calculated_cksum)
   {
@@ -403,7 +413,9 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       Debug("-> ROUTER: Verifying OSPF checksum\n");
       uint16_t received_cksum = ipHdr->ip_sum;
       ipHdr->ip_sum = 0;
-      uint16_t calculated_cksum = ip_cksum(ipHdr, len - ETHER_HDR_LENN);
+      uint16_t packet_len_wo_eth_hdrs;
+      packet_len_wo_eth_hdrs = len - ETHER_HDR_LENN;
+      uint16_t calculated_cksum = ip_cksum(ipHdr, packet_len_wo_eth_hdrs);
       if (received_cksum != calculated_cksum)
       {
         Debug("-> ROUTER: OSPF checksum incorrect\n");
@@ -427,7 +439,9 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       if (ipHdr->ip_dst == multicast_addr)
       {
         Debug("-> ROUTER: IP destination is multicast\n");
-        Debug("-> ROUTER: Sending OSPF packet to subsystem, by: %s and to: %s\n", inet_ntoa(*(struct in_addr *)&ipHdr->ip_src), inet_ntoa(*(struct in_addr *)&ipHdr->ip_dst));
+        Debug("-> ROUTER: Sending OSPF packet to subsystem,\n");
+        print_addr_ip_int(ipHdr->ip_src);
+        print_addr_ip_int(ipHdr->ip_dst);
         sr_handle_pwospf_packet(sr, packet, len, myInterface);
         return;
       }
@@ -452,7 +466,9 @@ void sr_handle_ip_packet(struct sr_instance *sr,
       Debug("-> ROUTER: Verifying ICMP checksum\n");
       uint16_t received_cksum = icmpHdr->icmp_sum;
       icmpHdr->icmp_sum = 0;
-      uint16_t calculated_cksum = icmp_cksum(icmpHdr, len - ETHER_HDR_LENN - IP_HDR_LEN);
+      uint16_t packet_len_wo_eth_ip_hdrs;
+      packet_len_wo_eth_ip_hdrs = len - ETHER_HDR_LENN - IP_HDR_LEN;
+      uint16_t calculated_cksum = icmp_cksum(icmpHdr, packet_len_wo_eth_ip_hdrs);
       if (received_cksum != calculated_cksum)
       {
         Debug("-> ROUTER: ICMP checksum incorrect\n");
@@ -503,7 +519,9 @@ void sr_handle_ip_packet(struct sr_instance *sr,
     Debug("-> ROUTER: Decrementing TTL and recalculating checksum\n");
     ipHdr->ip_ttl--;
     ipHdr->ip_sum = 0;
-    ipHdr->ip_sum = ip_cksum(ipHdr, IP_HDR_LEN);
+    uint16_t packet_len_wo_eth_hdrs;
+    packet_len_wo_eth_hdrs = len - ETHER_HDR_LENN;
+    ipHdr->ip_sum = ip_cksum(ipHdr, packet_len_wo_eth_hdrs);
 
     /* Buscar la mejor ruta */
     struct sr_rt *best_route = find_best_route(sr, ipHdr->ip_dst);

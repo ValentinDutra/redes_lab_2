@@ -370,8 +370,10 @@ void *send_hello_packet(void *arg)
 
     /* Calculo y seteo el chechsum IP*/
     Debug("-> PWOSPF: Calculating IP checksum\n");
+    uint16_t packet_len_wo_hdrs;
+    packet_len_wo_hdrs = packet_len - ETHER_HDR_LENN;
     ip_hdr->ip_sum = 0;
-    ip_hdr->ip_sum = cksum((uint8_t *)ip_hdr, IP_HDR_LEN);
+    ip_hdr->ip_sum = ip_cksum(ip_hdr, packet_len_wo_hdrs);
 
     /* Inicializo cabezal de PWOSPF con version 2 y tipo HELLO */
     Debug("-> PWOSPF: Setting OSPF header\n");
@@ -407,23 +409,25 @@ void *send_hello_packet(void *arg)
 
     /* Calculo y actualizo el checksum del cabezal OSPF */
     Debug("-> PWOSPF: Calculating OSPF checksum\n");
+    uint16_t packet_len_wo_eth_ip_hdrs;
+    packet_len_wo_eth_ip_hdrs = packet_len - ETHER_HDR_LENN - IP_HDR_LEN;
     ospf_hdr->csum = 0;
-    ospf_hdr->csum = cksum((uint8_t *)ospf_hdr, OSPF_HDR_LEN + OSPF_HELLO_HDR_LEN);
+    ospf_hdr->csum = ospfv2_cksum(ospf_hdr, packet_len_wo_eth_ip_hdrs);
 
     /* Envío el paquete HELLO */
     Debug("-> PWOSPF: Sending HELLO Packet\n");
     int response;
     response = sr_send_packet(hello_param->sr, packet, packet_len, hello_param->interface->name);
     (response == 0) ? Debug("-> PWOSPF: HELLO Packet sent\n") : Debug("-> PWOSPF: HELLO Packet not sent\n");
-    /* Imprimo información del paquete HELLO enviado */
 
-    Debug("-> PWOSPF: Sending HELLO Packet of length = %d, out of the interface: %s\n", packet_len, hello_param->interface->name);
-    Debug("      [Router ID = %s]\n", inet_ntoa(g_router_id));
+    /* Imprimo información del paquete HELLO enviado */
     struct in_addr ip_addr;
     ip_addr.s_addr = hello_param->interface->ip;
-    Debug("      [Router IP = %s]\n", inet_ntoa(ip_addr));
     struct in_addr mask_addr;
     mask_addr.s_addr = hello_param->interface->mask;
+    Debug("-> PWOSPF: Sending HELLO Packet of length = %d, out of the interface: %s\n", packet_len, hello_param->interface->name);
+    Debug("      [Router ID = %s]\n", htons(ospf_hdr->rid));
+    Debug("      [Router IP = %s]\n", inet_ntoa(ip_addr));
     Debug("      [Network Mask = %s]\n", inet_ntoa(mask_addr));
 
     return NULL;
@@ -512,18 +516,41 @@ void *send_lsu(void *arg)
 
 void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsigned int length, struct sr_if *rx_if)
 {
+    Debug("-> PWOSPF: Detecting PWOSPF HELLO Packet\n");
     /* Obtengo información del paquete recibido */
+    ospfv2_hdr_t *rx_ospfv2_hdr = ((ospfv2_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN));
+    ospfv2_hello_hdr_t *rx_ospfv2_hello_hdr = ((ospfv2_hello_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN));
     /* Imprimo info del paquete recibido*/
-    /*
+    uint32_t neighbor_id = rx_ospfv2_hdr->rid;
+    struct in_addr neighbor_id_addr;
+    neighbor_id_addr.s_addr = neighbor_id;
+
+    struct in_addr neighbor_ip;
+    neighbor_ip.s_addr = rx_if->ip;
+
+    struct in_addr net_mask;
+    net_mask.s_addr = rx_ospfv2_hello_hdr->nmask;
+
     Debug("-> PWOSPF: Detecting PWOSPF HELLO Packet from:\n");
-    Debug("      [Neighbor ID = %s]\n", inet_ntoa(neighbor_id));
+    Debug("      [Neighbor ID = %s]\n", inet_ntoa(neighbor_id_addr));
     Debug("      [Neighbor IP = %s]\n", inet_ntoa(neighbor_ip));
     Debug("      [Network Mask = %s]\n", inet_ntoa(net_mask));
-    */
 
     /* Chequeo checksum */
-    /*Debug("-> PWOSPF: HELLO Packet dropped, invalid checksum\n");*/
+    Debug("-> PWOSPF: Checking checksum\n");
+    uint16_t packet_len_wo_eth_ip_hdrs;
+    packet_len_wo_eth_ip_hdrs = length - ETHER_HDR_LENN - IP_HDR_LEN;
+    uint16_t received_cksum = rx_ospfv2_hdr->csum;
+    rx_ospfv2_hdr->csum = 0;
+    uint16_t calculated_cksum = ospfv2_cksum(rx_ospfv2_hdr, packet_len_wo_eth_ip_hdrs);
+    if (received_cksum != calculated_cksum)
+    {
+        Debug("-> PWOSPF: HELLO Packet dropped, invalid checksum\n");
+        return;
+    }
+    Debug("-> PWOSPF: HELLO Packet checksum correct\n");
 
+    /*Debug("-> PWOSPF: HELLO Packet dropped, invalid checksum\n");*/
     /* Chequeo de la máscara de red */
     /*Debug("-> PWOSPF: HELLO Packet dropped, invalid hello network mask\n");*/
 
