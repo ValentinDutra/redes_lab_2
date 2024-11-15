@@ -361,7 +361,7 @@ void *send_hello_packet(void *arg)
 
     /* Seteo IP origen con la IP de mi interfaz de salida */
     Debug("-> PWOSPF: Setting IP source\n");
-    ip_hdr->ip_src = hello_param->interface->ip;
+    ip_hdr->ip_src = htonl(hello_param->interface->ip);
 
     /* Seteo IP destino con la IP de Multicast dada: OSPF_AllSPFRouters  */
     Debug("-> PWOSPF: Setting IP destination\n");
@@ -421,7 +421,7 @@ void *send_hello_packet(void *arg)
 
     /* Imprimo información del paquete HELLO enviado */
     struct in_addr rid_addr;
-    rid_addr.s_addr = htonl(ospf_hdr->rid);
+    rid_addr.s_addr = ospf_hdr->rid;
 
     struct in_addr ip_addr;
     ip_addr.s_addr = hello_param->interface->ip;
@@ -530,7 +530,7 @@ void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsi
     neighbor_id_addr.s_addr = neighbor_id;
 
     struct in_addr neighbor_ip;
-    neighbor_ip.s_addr = rx_ip_hdr->ip_src;
+    neighbor_ip.s_addr = htonl(rx_ip_hdr->ip_src);
 
     struct in_addr net_mask;
     net_mask.s_addr = rx_ospfv2_hello_hdr->nmask;
@@ -599,16 +599,30 @@ void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsi
     ip_addr.s_addr = rx_if->ip;
 
     refresh_topology_entry(g_topology, g_router_id, net_num, mask_addr, neighbor_id_addr, neighbor_id_addr, g_sequence_num);
-
+    /* Si es un nuevo vecino, debo enviar LSUs por todas mis interfaces*/
+    Debug("-> PWOSPF: Start to sends LSU for all interfaces \n");
     if (isNew)
     {
-        /* Imprimo la lista de vecinos */
+        /* Recorro todas las interfaces para enviar el paquete LSU */
+        Debug("-> PWOSPF: Touring all interfaces to send LSU\n");
+        struct sr_if *iface;
+        for (iface = sr->if_list; iface != NULL; iface = iface->next)
+        {
+            if (iface != rx_if && iface->neighbor_id != 0)
+            {
+                powspf_hello_lsu_param_t *lsu_param = (powspf_hello_lsu_param_t *)malloc(sizeof(powspf_hello_lsu_param_t));
+                lsu_param->sr = sr;
+                lsu_param->interface = iface;
+
+                pthread_t lsu_thread;
+                pthread_create(&lsu_thread, NULL, send_lsu, lsu_param);
+                pthread_detach(lsu_thread);
+            }
+        }
+        /* Si la interfaz tiene un vecino, envío un LSU */
         Debug("\n-> PWOSPF: Printing the neighbors list\n");
         print_topolgy_table(g_topology);
     }
-    /* Si es un nuevo vecino, debo enviar LSUs por todas mis interfaces*/
-    /* Recorro todas las interfaces para enviar el paquete LSU */
-    /* Si la interfaz tiene un vecino, envío un LSU */
 
 } /* -- sr_handle_pwospf_hello_packet -- */
 
