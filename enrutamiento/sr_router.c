@@ -100,7 +100,7 @@ uint8_t *build_icmp_error_packet(uint8_t type,
   /* Crear un nuevo paquete */
   Debug("-> ROUTER: Creating new packet\n");
   uint8_t *packet = (uint8_t *)malloc(*len);
-  if (packet == 0)
+  if (packet == 0)  
   {
     Debug("-> ROUTER: Error building ICMP error packet\n");
     return NULL;
@@ -233,7 +233,6 @@ void send_packet_to_next_hop(struct sr_instance *sr, uint8_t *packet, unsigned i
 
     int response;
     response = sr_send_packet(sr, packet, len, outInterface->name);
-    free(arpEntry);
     (response == -1) ? Debug("-> ROUTER: Error sending packet\n") : Debug("-> ROUTER: Packet sent\n");
     return;
   }
