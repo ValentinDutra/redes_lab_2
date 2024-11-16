@@ -219,6 +219,38 @@ void *check_neighbors_life(void *arg)
     Cada 1 segundo, chequea la lista de vecinos.
     Si hay un cambio, se debe ajustar el neighbor id en la interfaz.
     */
+    while (1)
+    {
+        /* Cada 1 segundo, chequea la lista de vecinos. */
+        usleep(1000000);
+
+        /* Bloqueo para evitar mezclar el envío de HELLOs y LSUs */
+        pwospf_lock(sr->ospf_subsys);
+
+        /* Chequeo si los vecinos están vivos */
+        struct ospfv2_neighbor *neighbors_deleted;
+        neighbors_deleted = check_neighbors_alive(g_neighbors);
+        while (neighbors_deleted != NULL)
+        {
+            struct sr_if *iface = sr->if_list;
+            while (iface != NULL)
+            {
+                if (iface->neighbor_id == neighbors_deleted->neighbor_id.s_addr)
+                {
+                    iface->neighbor_id = 0;
+                    iface->neighbor_ip = 0;
+                    Debug("PWOSPF: Updated interface %s: Neighbor removed\n", iface->name);
+                    break;
+                }
+                iface = iface->next;
+            }
+            struct ospfv2_neighbor *next_deleted = neighbors_deleted->next;
+            free(neighbors_deleted);
+            neighbors_deleted = next_deleted;
+        }
+
+        pwospf_unlock(sr->ospf_subsys);
+    }
     return NULL;
 } /* -- check_neighbors_life -- */
 
