@@ -311,7 +311,7 @@ void *send_hellos(void *arg)
         for (iface = sr->if_list; iface != NULL; iface = iface->next)
         {
             /* Cada interfaz matiene un contador en segundos para los HELLO*/
-            if (iface->helloint > OSPF_DEFAULT_HELLOINT)
+            if (iface->helloint >= OSPF_DEFAULT_HELLOINT)
             {
                 iface->helloint++;
                 powspf_hello_lsu_param_t *hello_param = (powspf_hello_lsu_param_t *)malloc(sizeof(powspf_hello_lsu_param_t));
@@ -320,7 +320,6 @@ void *send_hellos(void *arg)
 
                 pthread_t hello_thread;
                 pthread_create(&hello_thread, NULL, send_hello_packet, hello_param);
-                pthread_detach(hello_thread);
                 /* Reiniciar el contador de segundos para HELLO */
                 iface->helloint = 0;
             }
@@ -393,11 +392,20 @@ void *send_hello_packet(void *arg)
 
     /* Seteo IP origen con la IP de mi interfaz de salida */
     Debug("-> PWOSPF: Setting IP source\n");
-    ip_hdr->ip_src = htonl(hello_param->interface->ip);
+    ip_hdr->ip_src = hello_param->interface->ip;
 
     /* Seteo IP destino con la IP de Multicast dada: OSPF_AllSPFRouters  */
     Debug("-> PWOSPF: Setting IP destination\n");
     ip_hdr->ip_dst = OSPF_AllSPFRouters;
+
+    /* Resto de parametros */
+    ip_hdr->ip_v = 4;
+    ip_hdr->ip_hl = 5;
+    ip_hdr->ip_tos = 0;
+    ip_hdr->ip_len = htons(IP_HDR_LEN + OSPF_HDR_LEN + OSPF_HELLO_HDR_LEN);
+    ip_hdr->ip_id = htons(0);
+    ip_hdr->ip_off = htons(0);
+    ip_hdr->ip_ttl = 64;
 
     /* Calculo y seteo el chechsum IP*/
     Debug("-> PWOSPF: Calculating IP checksum\n");
@@ -464,7 +472,8 @@ void *send_hello_packet(void *arg)
     Debug("      [Router ID = %s]\n", inet_ntoa(rid_addr));
     Debug("      [Router IP = %s]\n", inet_ntoa(ip_addr));
     Debug("      [Network Mask = %s]\n", inet_ntoa(mask_addr));
-
+    free(packet);
+    free(hello_param);
     return NULL;
 } /* -- send_hello_packet -- */
 
@@ -480,8 +489,6 @@ void *send_all_lsu(void *arg)
     Debug("\nPWOSPF: Starting to send LSUs\n");
     struct sr_instance *sr = (struct sr_instance *)arg;
 
-    struct sr_if *iface = sr->if_list;
-
     /* while true*/
     while (1)
     {
@@ -490,6 +497,8 @@ void *send_all_lsu(void *arg)
 
         /* Bloqueo para evitar mezclar el envío de HELLOs y LSUs */
         pwospf_lock(sr->ospf_subsys);
+
+        struct sr_if *iface = sr->if_list;
 
         Debug("\nPWOSPF: Touring all interfaces to send LSU \n");
         /* Recorro todas las interfaces para enviar el paquete LSU */
@@ -504,7 +513,6 @@ void *send_all_lsu(void *arg)
 
                 pthread_t lsu_thread;
                 pthread_create(&lsu_thread, NULL, send_lsu, lsu_param);
-                pthread_detach(lsu_thread);
             }
             iface = iface->next;
         }
@@ -526,6 +534,12 @@ void *send_all_lsu(void *arg)
 void *send_lsu(void *arg)
 {
     powspf_hello_lsu_param_t *lsu_param = ((powspf_hello_lsu_param_t *)(arg));
+
+    if (lsu_param == NULL)
+    {
+        Debug("PWOSPF: Error sending LSU\n");
+        return NULL;
+    }
 
     /* Solo envío LSUs si del otro lado hay un router*/
 
@@ -552,6 +566,7 @@ void *send_lsu(void *arg)
 
     Debug("-> PWOSPF: Setting Ethernet header\n");
     sr_ethernet_hdr_t *eth_hdr = (sr_ethernet_hdr_t *)packet;
+    eth_hdr->ether_type = htons(ETHERTYPE_IP);
     /* Dirección MAC destino la dejo para el final ya que hay que hacer ARP */
 
     /* Inicializo cabezal IP*/
@@ -563,8 +578,17 @@ void *send_lsu(void *arg)
 
     /* La IP destino es la del vecino contectado a mi interfaz*/
     Debug("-> PWOSPF: Setting IP destination\n");
-    ip_hdr->ip_dst = htonl(lsu_param->interface->neighbor_ip);
-    ip_hdr->ip_src = htonl(lsu_param->interface->ip);
+    ip_hdr->ip_dst = lsu_param->interface->neighbor_ip;
+    ip_hdr->ip_src = lsu_param->interface->ip;
+
+    /* Resto de parametros */
+    ip_hdr->ip_v = 4;
+    ip_hdr->ip_hl = 5;
+    ip_hdr->ip_tos = 0;
+    ip_hdr->ip_len = htons(IP_HDR_LEN + OSPF_HDR_LEN + OSPF_LSU_HDR_LEN + (num_lsas * LSA_LEN));
+    ip_hdr->ip_id = htons(0);
+    ip_hdr->ip_off = htons(0);
+    ip_hdr->ip_ttl = 64;
 
     Debug("-> PWOSPF: Calculating IP checksum\n");
     uint16_t packet_len_wo_hdrs;
@@ -577,10 +601,12 @@ void *send_lsu(void *arg)
     ospfv2_hdr_t *ospf_hdr = (ospfv2_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN);
     ospf_hdr->version = OSPF_V2;
     ospf_hdr->type = OSPF_TYPE_LSU;
+    ospf_hdr->autype = 0;
+    ospf_hdr->audata = 0;
 
     /* Seteo el TTL en 64 y el resto de los campos del cabezal de LSU */
     Debug("-> PWOSPF: Setting TTL\n");
-    ospfv2_lsu_hdr_t *lsu_hdr = (ospfv2_lsu_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN + OSPF_HDR_LEN);
+    ospfv2_lsu_hdr_t *lsu_hdr = (ospfv2_lsu_hdr_t *)(packet + ETHER_HDR_LENN + IP_HDR_LEN);
     lsu_hdr->ttl = OSPF_MAX_LSU_TTL;
 
     /* Seteo el número de secuencia y avanzo*/
@@ -602,7 +628,7 @@ void *send_lsu(void *arg)
     int lsa_index = 0;
     while (rt_entry != NULL && lsa_index < num_lsas)
     {
-        if (rt_entry->admin_dst == 1 || rt_entry->admin_dst == 0) 
+        if (rt_entry->admin_dst == 1 || rt_entry->admin_dst == 0)
         {
             struct in_addr subnet_addr;
             subnet_addr.s_addr = rt_entry->dest.s_addr & rt_entry->mask.s_addr;
@@ -611,7 +637,7 @@ void *send_lsu(void *arg)
             mask_addr.s_addr = rt_entry->mask.s_addr;
 
             struct in_addr router_id_addr;
-            router_id_addr.s_addr = g_router_id.s_addr; 
+            router_id_addr.s_addr = g_router_id.s_addr;
 
             lsa[lsa_index].subnet = subnet_addr.s_addr;
             lsa[lsa_index].mask = mask_addr.s_addr;
@@ -632,7 +658,7 @@ void *send_lsu(void *arg)
     ospf_hdr->csum = ospfv2_cksum(ospf_hdr, packet_len_wo_hdrs2);
 
     /* Me falta la MAC para poder enviar el paquete, la busco en la cache ARP*/
-    struct sr_arpentry *arpEntry = sr_arpcache_lookup(&lsu_param->sr->cache, htonl(lsu_param->interface->neighbor_ip));
+    struct sr_arpentry *arpEntry = sr_arpcache_lookup(&lsu_param->sr->cache,lsu_param->interface->neighbor_ip);
     /* Envío el paquete si obtuve la MAC o lo guardo en la cola para cuando tenga la MAC*/
     if (arpEntry != 0)
     {
@@ -649,6 +675,7 @@ void *send_lsu(void *arg)
         int response;
         response = sr_send_packet(lsu_param->sr, packet, packet_len, outInterface->name);
         free(packet);
+        free(lsu_param);
         (response == 0) ? Debug("-> PWOSPF: LSU Packet sent\n") : Debug("-> PWOSPF: LSU Packet not sent\n");
         return NULL;
     }
@@ -656,9 +683,10 @@ void *send_lsu(void *arg)
     {
         Debug("-> PWOSPF: ARP entry not found\n");
         Debug("-> PWOSPF: Queuing ARP request\n");
-        struct sr_arpreq *arpReq = sr_arpcache_queuereq(&lsu_param->sr->cache, htonl(lsu_param->interface->neighbor_ip), packet, packet_len, lsu_param->interface->name);
+        struct sr_arpreq *arpReq = sr_arpcache_queuereq(&lsu_param->sr->cache, lsu_param->interface->neighbor_ip, packet, packet_len, lsu_param->interface->name);
         handle_arpreq(lsu_param->sr, arpReq);
-
+        free(packet);
+        free(lsu_param);
         return NULL;
     }
     return NULL;
@@ -684,7 +712,7 @@ void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsi
     neighbor_id_addr.s_addr = neighbor_id;
 
     struct in_addr neighbor_ip;
-    neighbor_ip.s_addr = htonl(rx_ip_hdr->ip_src);
+    neighbor_ip.s_addr = rx_ip_hdr->ip_src;
 
     struct in_addr net_mask;
     net_mask.s_addr = rx_ospfv2_hello_hdr->nmask;
@@ -737,7 +765,7 @@ void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsi
         Debug("-> PWOSPF: New neighbor\n");
         isNew = 1;
     }
-    rx_if->neighbor_ip = htonl(neighbor_ip.s_addr);
+    rx_if->neighbor_ip = neighbor_ip.s_addr;
     rx_if->neighbor_id = neighbor_id;
     rx_if->helloint = OSPF_DEFAULT_HELLOINT;
 
@@ -762,13 +790,20 @@ void sr_handle_pwospf_hello_packet(struct sr_instance *sr, uint8_t *packet, unsi
             /* Si la interfaz tiene un vecino, envío un LSU */
             if (iface != rx_if)
             {
+                Debug("-> PWOSPF: Sending LSU for interface %s\n", iface->name);
                 powspf_hello_lsu_param_t *lsu_param = (powspf_hello_lsu_param_t *)malloc(sizeof(powspf_hello_lsu_param_t));
                 lsu_param->sr = sr;
-                lsu_param->interface = iface;
-
+                lsu_param->interface = rx_if;
+                lsu_param->interface->neighbor_id = neighbor_id;
+                lsu_param->interface->neighbor_ip = neighbor_ip.s_addr;
+                Debug("-> PWOSPF: Creating Thread to send LSU\n");
                 pthread_t lsu_thread;
-                pthread_create(&lsu_thread, NULL, send_lsu, lsu_param);
-                pthread_detach(lsu_thread);
+                if (pthread_create(&lsu_thread, NULL, send_lsu, lsu_param))
+                {
+                    Debug("-> PWOSPF: Error sending LSU\n");
+                    return NULL;
+                }
+                Debug("-> PWOSPF: LSU sent\n");
             }
         }
         Debug("\n-> PWOSPF: Printing the neighbors list\n");

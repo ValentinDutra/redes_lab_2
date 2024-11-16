@@ -119,7 +119,7 @@ uint8_t *build_icmp_error_packet(uint8_t type,
   ip_hdr->ip_v = 4;
   ip_hdr->ip_hl = IP_HDR_LEN / 4;
   ip_hdr->ip_tos = 0;
-  ip_hdr->ip_len = htons(IP_HDR_LEN + ICMP_T3_HDR_LEN);
+  ip_hdr->ip_len = htons(len - ETHER_HDR_LENN);
   ip_hdr->ip_id = htons(0);
   ip_hdr->ip_off = htons(IP_DF);
   ip_hdr->ip_ttl = 64;
@@ -129,7 +129,7 @@ uint8_t *build_icmp_error_packet(uint8_t type,
   ip_hdr->ip_sum = 0;
 
   uint16_t packet_len_wo_hdrs;
-  packet_len_wo_hdrs = len - ETHER_HDR_LENN;  
+  packet_len_wo_hdrs = *len - ETHER_HDR_LENN;  
   ip_hdr->ip_sum = ip_cksum(ip_hdr, packet_len_wo_hdrs);
 
   /* Construir el cabezal ICMP */
@@ -143,7 +143,7 @@ uint8_t *build_icmp_error_packet(uint8_t type,
   icmp_hdr->icmp_sum = 0;
 
   uint16_t packet_len_wo_eth_ip_hdrs;
-  packet_len_wo_eth_ip_hdrs = len - ETHER_HDR_LENN - IP_HDR_LEN;
+  packet_len_wo_eth_ip_hdrs = *len - ETHER_HDR_LENN - IP_HDR_LEN;
   icmp_hdr->icmp_sum = icmp3_cksum(icmp_hdr, packet_len_wo_eth_ip_hdrs);
 
   Debug("-> ROUTER: ICMP error packet created: Type %d, Code %d\n", type, code);
